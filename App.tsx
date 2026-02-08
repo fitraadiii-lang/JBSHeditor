@@ -424,7 +424,7 @@ const App: React.FC = () => {
         let unlockIconRun: any = new Paragraph("");
         try {
             const unlockBuffer = await getImageBuffer(UNLOCK_ICON_URL);
-            unlockIconRun = new ImageRun({ data: unlockBuffer, transformation: { width: 15, height: 15 }, type: "png" });
+            unlockIconRun = new ImageRun({ data: unlockBuffer, transformation: { width: 15, height: 15 }, 
         } catch(e) { console.warn("Unlock icon fetch failed", e); }
 
         const openAccessBoxTable = new Table({
