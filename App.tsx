@@ -209,12 +209,13 @@ const App: React.FC = () => {
         if (manuscriptData.logoUrl) {
             try {
                 const logoBuffer = await getImageBuffer(manuscriptData.logoUrl);
+                const isPng = manuscriptData.logoUrl.toLowerCase().includes("png") || manuscriptData.logoUrl.toLowerCase().includes("image/png");
                 logoImageRun = new Paragraph({
                     children: [
                         new ImageRun({
-                            data: logoBuffer,
+                            data: new Uint8Array(logoBuffer),
                             transformation: { width: 76, height: 76 },
-                            type: "png", 
+                            type: isPng ? "png" : "jpeg"
                         })
                     ]
                 });
@@ -424,7 +425,11 @@ const App: React.FC = () => {
         let unlockIconRun: any = new Paragraph("");
         try {
             const unlockBuffer = await getImageBuffer(UNLOCK_ICON_URL);
-            unlockIconRun = new ImageRun({ data: unlockBuffer, transformation: { width: 15, height: 15 }, 
+            unlockIconRun = new ImageRun({ 
+                data: new Uint8Array(unlockBuffer), 
+                transformation: { width: 15, height: 15 },
+                type: "png"
+            });
         } catch(e) { console.warn("Unlock icon fetch failed", e); }
 
         const openAccessBoxTable = new Table({
@@ -473,7 +478,12 @@ const App: React.FC = () => {
                 let figRun: any = new TextRun(`[Image: ${fig.caption}]`);
                 try {
                      const buf = await getImageBuffer(fig.fileUrl);
-                     figRun = new ImageRun({ data: buf, transformation: { width: 300, height: 300 }, type: "jpg" });
+                     const isPng = fig.fileUrl.toLowerCase().includes("png") || fig.fileUrl.toLowerCase().includes("image/png");
+                     figRun = new ImageRun({ 
+                         data: new Uint8Array(buf), 
+                         transformation: { width: 300, height: 300 },
+                         type: isPng ? "png" : "jpeg"
+                     });
                 } catch(e) { console.error(e) }
                 bodyChildren.push( new Paragraph({ children: [figRun], alignment: AlignmentType.CENTER, spacing: { before: 100 } }), new Paragraph({ children: [ new TextRun({ text: `Figure ${fig.id}: `, bold: true, color: journalBlue, font: "Arial", size: 18 }), new TextRun({ text: fig.caption, font: "Arial", size: 18 }) ], alignment: AlignmentType.CENTER, spacing: { before: 50, after: 300 } }) );
             }
