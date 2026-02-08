@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>JBSH Manuscript Generator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@0,300;0,400;0,700;0,900;1,300;1,400&family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <!-- html2pdf.js for client-side PDF generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <style>
+      /* Custom print styles - ROBUST FIX */
+      @media print {
+        @page {
+          size: A4;
+          margin: 0;
+        }
+        
+        /* Hide everything by default */
+        body * {
+          visibility: hidden;
+        }
+
+        /* Reset body and html to allow full height printing */
+        html, body {
+          height: auto !important;
+          overflow: visible !important;
+          background-color: white !important;
+          margin: 0 !important;
+          padding: 0 !important;
+        }
+
+        /* Target the printable content wrapper */
+        #printable-content, #printable-content * {
+          visibility: visible;
+        }
+
+        /* Position the printable content at the absolute top-left */
+        #printable-content {
+          position: absolute;
+          left: 0;
+          top: 0;
+          width: 100% !important;
+          max-width: 210mm !important; /* Force A4 width constraint */
+          margin: 0 auto !important;
+          padding: 0 !important;
+          background-color: white !important;
+          box-shadow: none !important;
+          display: block !important;
+        }
+
+        /* Hide UI specific classes explicitly */
+        .no-print {
+          display: none !important;
+        }
+        
+        /* Ensure text colors print correctly */
+        * {
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+        }
+      }
+
+      .font-serif-journal {
+        font-family: 'Georgia', serif;
+      }
+      .font-sans-journal {
+        font-family: 'Roboto', sans-serif;
+      }
+      
+      /* Utility to break multi-column layout for images/references */
+      .col-span-all {
+        column-span: all;
+        -webkit-column-span: all;
+      }
+      
+      /* Edit mode highlights */
+      .editable-highlight {
+        outline: 2px dashed #60a5fa;
+        outline-offset: 4px;
+        background-color: rgba(239, 246, 255, 0.4);
+        border-radius: 4px;
+        cursor: text;
+      }
+      .editable-highlight:focus {
+        outline: 2px solid #2563eb;
+        background-color: white;
+      }
+
+      /* SCOPUS Q1 TABLE STYLES */
+      /* These styles target tables within the manuscript content */
+      .manuscript-content table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 1.5rem 0;
+        font-family: 'Roboto', sans-serif; /* Tables often use sans-serif for clarity */
+        font-size: 8.5pt;
+        page-break-inside: avoid;
+      }
+      
+      .manuscript-content th {
+        border-top: 1.5px solid #000;
+        border-bottom: 1px solid #000;
+        text-align: left;
+        padding: 6px 4px;
+        font-weight: bold;
+        vertical-align: bottom;
+      }
+      
+      .manuscript-content td {
+        padding: 6px 4px;
+        vertical-align: top;
+        border: none; /* No vertical borders */
+      }
+      
+      /* Bottom border for the last row of the table */
+      .manuscript-content tr:last-child td {
+        border-bottom: 1.5px solid #000;
+      }
+
+      /* Optional: alternating row colors for readability (can be removed if strictly minimal style is preferred) */
+      /* .manuscript-content tr:nth-child(even) { background-color: #f9fafb; } */
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@^19.2.4",
+    "react/": "https://esm.sh/react@^19.2.4/",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
+    "@google/genai": "https://esm.sh/@google/genai@^1.40.0",
+    "lucide-react": "https://esm.sh/lucide-react@^0.563.0",
+    "mammoth": "https://esm.sh/mammoth@1.6.0",
+    "docx": "https://esm.sh/docx@8.5.0",
+    "file-saver": "https://esm.sh/file-saver@2.0.5"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body class="bg-gray-50 text-slate-900">
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html>
