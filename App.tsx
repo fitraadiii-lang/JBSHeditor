@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { ManuscriptData, AppState, ManuscriptFigure } from './types';
 import { parseManuscript } from './services/geminiService';
 import { LayoutPreview } from './components/LayoutPreview';
-import { Upload, FileText, Printer, ChevronLeft, RefreshCw, AlertCircle, ArrowRight, Image as ImageIcon, Plus, Trash2, FileDown, Edit, Check, Save, LogIn, User, LogOut } from 'lucide-react';
+import { Upload, FileText, Printer, ChevronLeft, RefreshCw, AlertCircle, ArrowRight, Image as ImageIcon, Plus, Trash2, FileDown, Edit, Check, Save, LogIn, User, LogOut, Home, FileSearch, Info, AlertTriangle, CheckCircle } from 'lucide-react';
 import mammoth from 'mammoth';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, ImageRun, SectionType, BorderStyle, Table, TableRow, TableCell, WidthType, ShadingType, Header, Footer, PageNumber, VerticalAlign } from "docx";
 import FileSaver from "file-saver";
@@ -27,6 +27,13 @@ declare global {
   }
 }
 
+interface ValidationStats {
+    originalWordCount: number;
+    generatedWordCount: number;
+    coveragePercent: number; // How many unique words from original exist in generated
+    status: 'success' | 'warning' | 'danger';
+}
+
 const App: React.FC = () => {
   // Start at LOGIN state
   const [appState, setAppState] = useState<AppState>(AppState.LOGIN);
@@ -35,6 +42,7 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
   const [isEditingPreview, setIsEditingPreview] = useState(false);
+  const [validationStats, setValidationStats] = useState<ValidationStats | null>(null);
 
   // Auth State
   const [loginEmail, setLoginEmail] = useState("");
@@ -74,6 +82,69 @@ const App: React.FC = () => {
     setLoginPassword("");
   };
 
+  const handleGoHome = () => {
+      setAppState(AppState.UPLOAD);
+      setManuscriptData(null);
+      setRawText("");
+      setError(null);
+      setValidationStats(null);
+  };
+
+  // --- VALIDATION LOGIC ---
+  const runValidation = (original: string, generated: ManuscriptData) => {
+      // 1. Helper to clean text and get words array
+      const getWords = (text: string) => {
+          return text
+            .replace(/<[^>]*>/g, ' ') // Strip HTML
+            .replace(/\[FIGURE REMOVED\]/g, ' ')
+            .replace(/[^\w\s]/g, '') // Remove punctuation
+            .toLowerCase()
+            .split(/\s+/)
+            .filter(w => w.length > 3); // Only count significant words > 3 chars
+      };
+
+      const originalWords = getWords(original);
+      
+      // Combine all generated text
+      const generatedContent = [
+          generated.title,
+          generated.abstract,
+          ...generated.keywords,
+          ...generated.sections.map(s => s.content),
+          ...generated.references
+      ].join(' ');
+      
+      const generatedWords = getWords(generatedContent);
+      const generatedWordSet = new Set(generatedWords);
+
+      // 2. Metrics
+      const origCount = originalWords.length;
+      const genCount = generatedWords.length;
+
+      // 3. Keyword Coverage (Intersection)
+      const uniqueOriginalWords = new Set(originalWords);
+      let foundCount = 0;
+      uniqueOriginalWords.forEach(w => {
+          if (generatedWordSet.has(w)) foundCount++;
+      });
+      
+      const coverage = uniqueOriginalWords.size > 0 
+        ? Math.round((foundCount / uniqueOriginalWords.size) * 100) 
+        : 0;
+
+      // 4. Determine Status
+      let status: 'success' | 'warning' | 'danger' = 'success';
+      if (coverage < 70 || genCount < origCount * 0.6) status = 'danger';
+      else if (coverage < 85 || genCount < origCount * 0.8) status = 'warning';
+
+      setValidationStats({
+          originalWordCount: origCount,
+          generatedWordCount: genCount,
+          coveragePercent: coverage,
+          status
+      });
+  };
+
   // Helper to read file content
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -86,16 +157,69 @@ const App: React.FC = () => {
        reader.onload = async (e) => {
          const arrayBuffer = e.target?.result as ArrayBuffer;
          try {
-           // CHANGED: convertToHtml to preserve tables
+           // 1. Convert to HTML to get structure and IMAGES
            const result = await mammoth.convertToHtml({ arrayBuffer });
-           setRawText(result.value);
-           processManuscript(result.value);
+           const fullHtml = result.value;
+           
+           // 2. Extract Images from the HTML result locally
+           const extractedFigures: ManuscriptFigure[] = [];
+           const parser = new DOMParser();
+           const doc = parser.parseFromString(fullHtml, 'text/html');
+           const imgs = doc.querySelectorAll('img');
+           
+           imgs.forEach((img, index) => {
+               const src = img.getAttribute('src');
+               if(src && src.startsWith('data:image')) {
+                   extractedFigures.push({
+                       id: (index + 1).toString(),
+                       fileUrl: src,
+                       caption: `Figure ${index + 1} (Extracted from source)`
+                   });
+               }
+           });
+
+           // 3. Remove heavy base64 images from text before sending to Gemini to save tokens
+           // We keep the rest of the HTML (tables, paragraphs) intact.
+           const cleanHtmlForAI = fullHtml.replace(/<img[^>]*>/g, '[FIGURE REMOVED]');
+
+           setRawText(cleanHtmlForAI);
+           processManuscript(cleanHtmlForAI, extractedFigures);
+
          } catch (err) {
            console.error(err);
            setError("Failed to read DOCX file. Is it corrupted?");
          }
        };
        reader.readAsArrayBuffer(file);
+    } else if (fileName.endsWith('.html') || fileName.endsWith('.htm')) {
+       // HTML File Support
+       const reader = new FileReader();
+       reader.onload = async (e) => {
+         const text = e.target?.result as string;
+         
+         // Try to extract images if they are embedded base64
+         const extractedFigures: ManuscriptFigure[] = [];
+         try {
+             const parser = new DOMParser();
+             const doc = parser.parseFromString(text, 'text/html');
+             const imgs = doc.querySelectorAll('img');
+             imgs.forEach((img, index) => {
+                 const src = img.getAttribute('src');
+                 if(src && src.startsWith('data:image')) {
+                     extractedFigures.push({
+                         id: (index + 1).toString(),
+                         fileUrl: src,
+                         caption: `Figure ${index + 1}`
+                     });
+                 }
+             });
+         } catch(e) { console.warn("Failed to extract images from HTML", e); }
+
+         const cleanHtmlForAI = text.replace(/<img[^>]*>/g, '[FIGURE REMOVED]');
+         setRawText(cleanHtmlForAI);
+         processManuscript(cleanHtmlForAI, extractedFigures);
+       };
+       reader.readAsText(file);
     } else {
        // Assume text/md
        const reader = new FileReader();
@@ -116,18 +240,28 @@ const App: React.FC = () => {
       processManuscript(rawText);
   }
 
-  const processManuscript = async (text: string) => {
+  const processManuscript = async (text: string, initialFigures: ManuscriptFigure[] = []) => {
     setAppState(AppState.PROCESSING);
     setError(null);
+    setValidationStats(null);
     try {
       const data = await parseManuscript(text);
+      
       // Inject Default Logo if not provided by parser
       if (!data.logoUrl || data.logoUrl.includes('placeholder')) {
          data.logoUrl = DEFAULT_LOGO_URL;
       }
-      if (!data.figures) {
+      
+      // MERGE FIGURES: Use extracted figures from Docx if available, otherwise empty
+      if (initialFigures.length > 0) {
+          data.figures = initialFigures;
+      } else if (!data.figures) {
           data.figures = [];
       }
+
+      // RUN VALIDATION
+      runValidation(text, data);
+
       setManuscriptData(data);
       setAppState(AppState.METADATA_REVIEW);
     } catch (err: any) {
@@ -168,22 +302,21 @@ const App: React.FC = () => {
       }
   };
 
-  // Revised helper to get image data AND type for docx
-  const getImageData = async (url: string): Promise<{ data: ArrayBuffer, type: "png" | "jpeg" | "gif" | "bmp" | "svg" }> => {
+  const getImageBuffer = async (url: string): Promise<{ data: ArrayBuffer, extension: "png" | "jpg" | "gif" | "bmp" }> => {
       try {
           const response = await fetch(url);
           const blob = await response.blob();
-          const buffer = await blob.arrayBuffer();
-          
-          let type: "png" | "jpeg" | "gif" | "bmp" | "svg" = "png";
+          const data = await blob.arrayBuffer();
           const mime = blob.type.toLowerCase();
+          let extension: "png" | "jpg" | "gif" | "bmp" = "png";
           
-          if (mime.includes("jpeg") || mime.includes("jpg")) type = "jpeg";
-          else if (mime.includes("gif")) type = "gif";
-          else if (mime.includes("bmp")) type = "bmp";
-          else if (mime.includes("svg")) type = "svg";
-          
-          return { data: buffer, type };
+          if (mime.includes("jpeg") || mime.includes("jpg")) extension = "jpg";
+          else if (mime.includes("gif")) extension = "gif";
+          else if (mime.includes("bmp")) extension = "bmp";
+          // We ignore SVG for now to prevent types error (requires fallback for docx)
+          // else if (mime.includes("svg")) extension = "svg";
+
+          return { data, extension };
       } catch (e) {
           console.error("Failed to fetch image for docx", e);
           throw new Error("Image fetch failed");
@@ -194,7 +327,7 @@ const App: React.FC = () => {
     // Rudimentary stripping for DOCX text run fallback
     let text = html;
     text = text.replace(/<br\s*\/?>/gi, '\n');
-    text = text.replace(/<\/p>/gi, '\n\n');
+    text = text.replace(/<\/p>/gi, '\n\n'); // IMPORTANT: Newlines between paragraphs
     text = text.replace(/<\/tr>/gi, '\n'); // Table row to newline
     text = text.replace(/<\/td>/gi, '\t'); // Table cell to tab
     text = text.replace(/<\/th>/gi, '\t');
@@ -219,14 +352,14 @@ const App: React.FC = () => {
         let logoImageRun: any = new Paragraph("");
         if (manuscriptData.logoUrl) {
             try {
-                const { data: logoBuffer, type: logoType } = await getImageData(manuscriptData.logoUrl);
+                const { data: logoBuffer, extension } = await getImageBuffer(manuscriptData.logoUrl);
                 // Note: ImageRun automatically detects type from buffer signature in docx v8.x
                 logoImageRun = new Paragraph({
                     children: [
                         new ImageRun({
                             data: new Uint8Array(logoBuffer),
                             transformation: { width: 76, height: 76 },
-                          
+                            type: extension
                         })
                     ]
                 });
@@ -236,7 +369,7 @@ const App: React.FC = () => {
             }
         }
 
-        // --- FRONT MATTER ---
+        // --- FRONT MATTER (Header, Access, DOI, Title, etc.) ---
         // 1. Header Table
         const headerTable = new Table({
             width: { size: 100, type: WidthType.PERCENTAGE },
@@ -327,7 +460,6 @@ const App: React.FC = () => {
         manuscriptData.authors.forEach((a, i) => {
             const cleanName = a.name.replace(/[0-9]+$/, ''); 
             authorsParagraph.addChildElement(new TextRun({ text: cleanName, bold: true, size: 22, font: "Georgia" }));
-            // Superscript with mapped index
             const affIdx = getAffiliationIndex(a.affiliation);
             authorsParagraph.addChildElement(new TextRun({ text: `${affIdx}${a.email ? '*' : ''}`, superScript: true, size: 18, font: "Georgia" }));
             if(i < manuscriptData.authors.length - 1) {
@@ -384,115 +516,71 @@ const App: React.FC = () => {
         frontMatterChildren.push(abstractTable);
         frontMatterChildren.push(new Paragraph({ text: "", spacing: { after: 200 } }));
 
-
-        // 9. Dates
-        frontMatterChildren.push(
-            new Paragraph({
-                children: [
-                    new TextRun({ text: "Received: ", bold: true, color: journalBlue, font: "Arial", size: 16 }),
-                    new TextRun({ text: `${manuscriptData.receivedDate} | `, font: "Arial", size: 16 }),
-                    new TextRun({ text: "Accepted: ", bold: true, color: journalBlue, font: "Arial", size: 16 }),
-                    new TextRun({ text: `${manuscriptData.acceptedDate} | `, font: "Arial", size: 16 }),
-                    new TextRun({ text: "Published: ", bold: true, color: journalBlue, font: "Arial", size: 16 }),
-                    new TextRun({ text: `${manuscriptData.publishedDate}`, font: "Arial", size: 16 }),
-                ],
-                alignment: AlignmentType.CENTER,
-                border: { top: { style: BorderStyle.SINGLE, size: 4, space: 1, color: "DDDDDD" } },
-                spacing: { before: 200, after: 200 }
-            })
-        );
-        
-        // 10. Citation Box
+        // 9. Dates, Citation, Access
+        frontMatterChildren.push(new Paragraph({ children: [new TextRun({ text: "Received: ", bold: true, color: journalBlue, font: "Arial", size: 16 }), new TextRun({ text: `${manuscriptData.receivedDate} | `, font: "Arial", size: 16 }), new TextRun({ text: "Accepted: ", bold: true, color: journalBlue, font: "Arial", size: 16 }), new TextRun({ text: `${manuscriptData.acceptedDate} | `, font: "Arial", size: 16 }), new TextRun({ text: "Published: ", bold: true, color: journalBlue, font: "Arial", size: 16 }), new TextRun({ text: `${manuscriptData.publishedDate}`, font: "Arial", size: 16 })], alignment: AlignmentType.CENTER, border: { top: { style: BorderStyle.SINGLE, size: 4, space: 1, color: "DDDDDD" } }, spacing: { before: 200, after: 200 } }));
         const citationAuthors = manuscriptData.authors.length > 2 ? `${manuscriptData.authors[0].name} et al.` : manuscriptData.authors.map(a => a.name).join(' & ');
-        const citationTable = new Table({
-             width: { size: 100, type: WidthType.PERCENTAGE },
-             borders: { top: { style: BorderStyle.NONE }, bottom: { style: BorderStyle.NONE }, right: { style: BorderStyle.NONE }, left: { style: BorderStyle.SINGLE, size: 24, color: journalBlue }, insideVertical: { style: BorderStyle.NONE }, insideHorizontal: { style: BorderStyle.NONE },
-             },
-             rows: [
-                 new TableRow({
-                     children: [
-                         new TableCell({
-                             shading: { fill: "F0F9FF", type: ShadingType.CLEAR },
-                             children: [
-                                 new Paragraph({
-                                     children: [
-                                         new TextRun({ text: "Cite this article: ", bold: true, color: journalBlue, font: "Arial", size: 16 }),
-                                         new TextRun({ text: `${citationAuthors} (${manuscriptData.year}). ${manuscriptData.title}. `, font: "Georgia", size: 16 }),
-                                         new TextRun({ text: "Journal of Biomedical Sciences and Health", italics: true, font: "Georgia", size: 16 }),
-                                         new TextRun({ text: `, ${manuscriptData.volume}(${manuscriptData.issue}), ${manuscriptData.pages}. https://doi.org/${manuscriptData.doi}`, font: "Georgia", size: 16 })
-                                     ],
-                                     alignment: AlignmentType.JUSTIFIED,
-                                 })
-                             ],
-                             margins: { left: 100, right: 100, top: 100, bottom: 100 }
-                         })
-                     ]
-                 })
-             ]
-        });
+        const citationTable = new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, borders: { top: { style: BorderStyle.NONE }, bottom: { style: BorderStyle.NONE }, right: { style: BorderStyle.NONE }, left: { style: BorderStyle.SINGLE, size: 24, color: journalBlue }, insideVertical: { style: BorderStyle.NONE }, insideHorizontal: { style: BorderStyle.NONE } }, rows: [ new TableRow({ children: [ new TableCell({ shading: { fill: "F0F9FF", type: ShadingType.CLEAR }, children: [ new Paragraph({ children: [ new TextRun({ text: "Cite this article: ", bold: true, color: journalBlue, font: "Arial", size: 16 }), new TextRun({ text: `${citationAuthors} (${manuscriptData.year}). ${manuscriptData.title}. `, font: "Georgia", size: 16 }), new TextRun({ text: "Journal of Biomedical Sciences and Health", italics: true, font: "Georgia", size: 16 }), new TextRun({ text: `, ${manuscriptData.volume}(${manuscriptData.issue}), ${manuscriptData.pages}. https://doi.org/${manuscriptData.doi}`, font: "Georgia", size: 16 }) ], alignment: AlignmentType.JUSTIFIED }) ], margins: { left: 100, right: 100, top: 100, bottom: 100 } }) ] }) ] });
         frontMatterChildren.push(citationTable);
         frontMatterChildren.push(new Paragraph({ text: "", spacing: { after: 200 } }));
-
-        // 11. Open Access Statement Box
-        let unlockIconRun: any = new Paragraph("");
-        try {
-            const { data: unlockBuffer, type: unlockType } = await getImageData(UNLOCK_ICON_URL);
-            unlockIconRun = new ImageRun({ 
-                data: new Uint8Array(unlockBuffer), 
-                transformation: { width: 15, height: 15 },
-            });
-        } catch(e) { console.warn("Unlock icon fetch failed", e); }
-
-        const openAccessBoxTable = new Table({
-             width: { size: 100, type: WidthType.PERCENTAGE },
-             borders: { top: { style: BorderStyle.SINGLE, color: "CCCCCC", size: 2 }, bottom: { style: BorderStyle.SINGLE, color: "CCCCCC", size: 2 }, left: { style: BorderStyle.SINGLE, color: "CCCCCC", size: 2 }, right: { style: BorderStyle.SINGLE, color: "CCCCCC", size: 2 }, insideVertical: { style: BorderStyle.NONE } },
-             rows: [
-                 new TableRow({
-                     children: [
-                         new TableCell({
-                             width: { size: 5, type: WidthType.PERCENTAGE },
-                             children: [ new Paragraph({ children: [unlockIconRun], alignment: AlignmentType.CENTER }) ],
-                             verticalAlign: VerticalAlign.CENTER,
-                             shading: { fill: "F3F4F6", type: ShadingType.CLEAR },
-                         }),
-                         new TableCell({
-                             width: { size: 95, type: WidthType.PERCENTAGE },
-                             children: [ new Paragraph({ children: [ new TextRun({ text: "Open Access. ", bold: true, color: journalBlue, font: "Arial", size: 16 }), new TextRun({ text: "This article is an open access article distributed under the terms and conditions of the Creative Commons Attribution 4.0 International License (CC BY 4.0).", font: "Arial", size: 16 }) ], alignment: AlignmentType.JUSTIFIED }) ],
-                             margins: { top: 100, bottom: 100, left: 100, right: 100 },
-                             verticalAlign: VerticalAlign.CENTER,
-                         })
-                     ]
-                 })
-             ]
-        });
-
+        let unlockIconRun: any = new Paragraph(""); try { const { data: unlockBuffer, extension } = await getImageBuffer(UNLOCK_ICON_URL); unlockIconRun = new ImageRun({ data: new Uint8Array(unlockBuffer), transformation: { width: 15, height: 15 }, type: extension }); } catch(e) { console.warn("Unlock icon fetch failed", e); }
+        const openAccessBoxTable = new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, borders: { top: { style: BorderStyle.SINGLE, color: "CCCCCC", size: 2 }, bottom: { style: BorderStyle.SINGLE, color: "CCCCCC", size: 2 }, left: { style: BorderStyle.SINGLE, color: "CCCCCC", size: 2 }, right: { style: BorderStyle.SINGLE, color: "CCCCCC", size: 2 }, insideVertical: { style: BorderStyle.NONE } }, rows: [ new TableRow({ children: [ new TableCell({ width: { size: 5, type: WidthType.PERCENTAGE }, children: [ new Paragraph({ children: [unlockIconRun], alignment: AlignmentType.CENTER }) ], verticalAlign: VerticalAlign.CENTER, shading: { fill: "F3F4F6", type: ShadingType.CLEAR } }), new TableCell({ width: { size: 95, type: WidthType.PERCENTAGE }, children: [ new Paragraph({ children: [ new TextRun({ text: "Open Access. ", bold: true, color: journalBlue, font: "Arial", size: 16 }), new TextRun({ text: "This article is an open access article distributed under the terms and conditions of the Creative Commons Attribution 4.0 International License (CC BY 4.0).", font: "Arial", size: 16 }) ], alignment: AlignmentType.JUSTIFIED }) ], margins: { top: 100, bottom: 100, left: 100, right: 100 }, verticalAlign: VerticalAlign.CENTER }) ] }) ] });
         frontMatterChildren.push(openAccessBoxTable);
         frontMatterChildren.push(new Paragraph({ text: "", spacing: { after: 400 } }));
 
-        // --- BODY ---
-        manuscriptData.sections.forEach(section => {
-            // STRIP HTML TAGS for DOCX to prevent raw html rendering
-            // Note: This loses table formatting in DOCX (preview is fine), but prevents broken output.
-            // Full HTML table to DOCX table conversion is extremely complex for a client-side snippet.
-            const plainContent = stripHtmlToText(section.content);
+        // --- BODY with Inline Figures ---
+        const placedFigures = new Set<string>();
 
-            bodyChildren.push(
-                new Paragraph({ children: [new TextRun({ text: section.heading, bold: true, color: "000000", font: "Arial", size: 22 })], heading: HeadingLevel.HEADING_1, spacing: { before: 200, after: 100 } }),
-                new Paragraph({ children: [new TextRun({ text: plainContent, font: "Georgia", size: 21 })], alignment: AlignmentType.JUSTIFIED, spacing: { after: 200 } })
-            );
-        });
+        for (const section of manuscriptData.sections) {
+            bodyChildren.push(new Paragraph({ children: [new TextRun({ text: section.heading, bold: true, color: "000000", font: "Arial", size: 22 })], heading: HeadingLevel.HEADING_1, spacing: { before: 200, after: 100 } }));
+            
+            // Split content into paragraphs to inject figures between them
+            const paragraphs = stripHtmlToText(section.content).split(/\n\n+/);
+            
+            for (const paraText of paragraphs) {
+                if (!paraText.trim()) continue;
 
-        // Figures
-        if (manuscriptData.figures.length > 0) {
-            bodyChildren.push(new Paragraph({ children: [new TextRun({ text: "FIGURES", bold: true, font: "Arial", size: 22 })], spacing: { before: 400, after: 200 } }));
-            for (const fig of manuscriptData.figures) {
+                bodyChildren.push(new Paragraph({ children: [new TextRun({ text: paraText, font: "Georgia", size: 21 })], alignment: AlignmentType.JUSTIFIED, spacing: { after: 200 } }));
+
+                // Check for Figure matches (e.g., "Figure 1") in this paragraph
+                const regex = /(?:Figure|Fig\.?)\s*(\d+)/gi;
+                let match;
+                while ((match = regex.exec(paraText)) !== null) {
+                    const figId = match[1];
+                    if (!placedFigures.has(figId)) {
+                        const fig = manuscriptData.figures.find(f => f.id === figId);
+                        if (fig) {
+                             placedFigures.add(figId);
+                             
+                             let figRun: any = new TextRun(`[Image: ${fig.caption}]`);
+                             try {
+                                  const { data: buf, extension } = await getImageBuffer(fig.fileUrl);
+                                  figRun = new ImageRun({ 
+                                      data: new Uint8Array(buf), 
+                                      transformation: { width: 300, height: 300 },
+                                      type: extension
+                                  });
+                             } catch(e) { console.error(e) }
+                             
+                             bodyChildren.push(new Paragraph({ children: [figRun], alignment: AlignmentType.CENTER, spacing: { before: 100 } }));
+                             bodyChildren.push(new Paragraph({ children: [ new TextRun({ text: `Figure ${fig.id}: `, bold: true, color: journalBlue, font: "Arial", size: 18 }), new TextRun({ text: fig.caption, font: "Arial", size: 18 }) ], alignment: AlignmentType.CENTER, spacing: { before: 50, after: 300 } }));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Remaining Figures (Fallback)
+        const remainingFigures = manuscriptData.figures.filter(f => !placedFigures.has(f.id));
+        if (remainingFigures.length > 0) {
+            bodyChildren.push(new Paragraph({ children: [new TextRun({ text: "ADDITIONAL FIGURES", bold: true, font: "Arial", size: 22 })], spacing: { before: 400, after: 200 } }));
+            for (const fig of remainingFigures) {
                 let figRun: any = new TextRun(`[Image: ${fig.caption}]`);
                 try {
-                     const { data: buf, type: figType } = await getImageData(fig.fileUrl);
+                     const { data: buf, extension } = await getImageBuffer(fig.fileUrl);
                      figRun = new ImageRun({ 
                          data: new Uint8Array(buf), 
                          transformation: { width: 300, height: 300 },
-                        
+                         type: extension
                      });
                 } catch(e) { console.error(e) }
                 bodyChildren.push( new Paragraph({ children: [figRun], alignment: AlignmentType.CENTER, spacing: { before: 100 } }), new Paragraph({ children: [ new TextRun({ text: `Figure ${fig.id}: `, bold: true, color: journalBlue, font: "Arial", size: 18 }), new TextRun({ text: fig.caption, font: "Arial", size: 18 }) ], alignment: AlignmentType.CENTER, spacing: { before: 50, after: 300 } }) );
@@ -501,8 +589,14 @@ const App: React.FC = () => {
 
         // References
         bodyChildren.push( new Paragraph({ children: [new TextRun({ text: "REFERENCES", bold: true, font: "Arial", size: 22 })], heading: HeadingLevel.HEADING_1, spacing: { before: 400, after: 200 }, border: { top: { style: BorderStyle.SINGLE, size: 6 } } }) );
-        manuscriptData.references.forEach((ref, index) => {
-             bodyChildren.push( new Paragraph({ children: [new TextRun({ text: `${index + 1}. ${ref}`, font: "Georgia", size: 18 })], alignment: AlignmentType.JUSTIFIED, spacing: { after: 100 } }) );
+        manuscriptData.references.forEach((ref) => {
+             // Hanging indent for APA
+             bodyChildren.push( new Paragraph({ 
+                 children: [new TextRun({ text: ref, font: "Georgia", size: 18 })], 
+                 alignment: AlignmentType.JUSTIFIED, 
+                 spacing: { after: 100 },
+                 indent: { hanging: 720 } 
+            }) );
         });
 
         // --- FOOTERS/HEADERS ---
@@ -636,6 +730,9 @@ const App: React.FC = () => {
       <nav className="bg-gradient-to-r from-[#0083B0] to-[#00B4DB] text-white p-4 shadow-md no-print sticky top-0 z-50">
         <div className="max-w-7xl mx-auto flex justify-between items-center">
           <div className="flex items-center gap-3">
+             <button onClick={handleGoHome} className="bg-white/20 hover:bg-white/30 text-white p-1.5 rounded-lg transition-colors mr-2 flex items-center justify-center border border-white/20" title="Home / Dashboard">
+                <Home size={20} />
+             </button>
             <div className="bg-white text-[#0083B0] px-2 py-1 rounded font-bold text-xl tracking-tight shadow-sm border border-blue-200">
                 JBSH
             </div>
@@ -679,8 +776,8 @@ const App: React.FC = () => {
                 <div className="p-8">
                     {error && (<div className="bg-red-50 text-red-700 p-4 rounded-lg mb-6 flex items-center gap-3 border border-red-200"><AlertCircle size={20} />{error}</div>)}
                     <div className="border-2 border-dashed border-slate-300 rounded-lg p-10 text-center hover:bg-slate-50 transition-colors group relative cursor-pointer">
-                        <div className="flex flex-col items-center gap-4 relative z-0"><div className="p-4 bg-sky-50 text-[#007398] rounded-full group-hover:scale-110 transition-transform"><Upload size={32} /></div><div><h3 className="font-bold text-slate-800 text-lg">Upload Manuscript File</h3><p className="text-slate-500 text-sm mt-1">Supports .docx, .txt, .md</p></div></div>
-                        <input type="file" accept=".docx,.txt,.md" onChange={handleFileUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-50"/>
+                        <div className="flex flex-col items-center gap-4 relative z-0"><div className="p-4 bg-sky-50 text-[#007398] rounded-full group-hover:scale-110 transition-transform"><Upload size={32} /></div><div><h3 className="font-bold text-slate-800 text-lg">Upload Manuscript File</h3><p className="text-slate-500 text-sm mt-1">Supports .docx, .html, .txt, .md</p></div></div>
+                        <input type="file" accept=".docx,.txt,.md,.html,.htm" onChange={handleFileUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-50"/>
                     </div>
                     <div className="mt-8">
                         <label className="block text-sm font-medium text-slate-700 mb-2">Or paste manuscript text directly:</label>
@@ -706,46 +803,109 @@ const App: React.FC = () => {
         )}
 
         {appState === AppState.METADATA_REVIEW && manuscriptData && (
-             <div className="max-w-6xl mx-auto bg-white shadow-xl rounded-xl overflow-hidden animate-in fade-in slide-in-from-bottom-4 no-print">
-                <div className="bg-slate-800 p-6 text-white flex justify-between items-center sticky top-0 z-40"><div><h2 className="text-2xl font-bold">Metadata & Assets Review</h2><p className="opacity-80 text-sm">Verify details and upload figures before generating the PDF.</p></div><div className="bg-[#00B4DB] px-4 py-1.5 rounded-full text-xs font-bold tracking-wide">JBSH EDITOR</div></div>
-                <div className="p-8 grid grid-cols-1 lg:grid-cols-3 gap-8">
-                    <div className="space-y-6 lg:col-span-1 border-r border-slate-200 pr-0 lg:pr-6">
-                         <h3 className="font-bold text-slate-800 border-b pb-2 mb-4 flex items-center gap-2"><FileText size={18} className="text-[#00B4DB]" /> Article Metadata</h3>
-                         <div className="grid grid-cols-2 gap-3">
-                            <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Vol</label><input type="text" value={manuscriptData.volume} onChange={(e) => handleUpdateField('volume', e.target.value)} className="w-full border border-slate-300 p-2 rounded text-sm" /></div>
-                            <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Issue</label><input type="text" value={manuscriptData.issue} onChange={(e) => handleUpdateField('issue', e.target.value)} className="w-full border border-slate-300 p-2 rounded text-sm" /></div>
-                            <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Year</label><input type="text" value={manuscriptData.year} onChange={(e) => handleUpdateField('year', e.target.value)} className="w-full border border-slate-300 p-2 rounded text-sm" /></div>
-                             <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Pages</label><input type="text" value={manuscriptData.pages} onChange={(e) => handleUpdateField('pages', e.target.value)} className="w-full border border-slate-300 p-2 rounded text-sm" /></div>
-                         </div>
-                         <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">DOI</label><input type="text" value={manuscriptData.doi} onChange={(e) => handleUpdateField('doi', e.target.value)} className="w-full border border-slate-300 p-2 rounded text-sm" /></div>
-                         <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Title</label><textarea value={manuscriptData.title} onChange={(e) => handleUpdateField('title', e.target.value)} className="w-full border border-slate-300 p-2 rounded text-sm focus:ring-1 focus:ring-[#007398] outline-none" rows={3}/></div>
-                         <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Abstract</label><textarea value={manuscriptData.abstract} onChange={(e) => handleUpdateField('abstract', e.target.value)} className="w-full border border-slate-300 p-2 rounded text-sm focus:ring-1 focus:ring-[#007398] outline-none" rows={6}/></div>
-                    </div>
-
-                    <div className="space-y-6 lg:col-span-1 border-r border-slate-200 pr-0 lg:pr-6">
-                        <h3 className="font-bold text-slate-800 border-b pb-2 mb-4 flex items-center gap-2"><ImageIcon size={18} className="text-[#00B4DB]" /> Manuscript Figures</h3>
-                        <div className="bg-slate-50 p-4 rounded-lg border border-dashed border-slate-300">
-                             <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">Add New Figure</label>
-                             <input type="text" placeholder="Figure Caption (e.g. Figure 1. Chart of growth)" className="w-full border p-2 rounded text-sm mb-2" value={newFigCaption} onChange={(e) => setNewFigCaption(e.target.value)}/>
-                             <div className="relative w-full"><button className="w-full bg-slate-200 text-slate-700 py-2 rounded text-sm font-medium hover:bg-slate-300 transition-colors flex items-center justify-center gap-2"><Plus size={16} /> Upload Image</button><input type="file" accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleAddFigure}/></div>
+             <div className="max-w-6xl mx-auto animate-in fade-in slide-in-from-bottom-4 no-print flex gap-6">
+                
+                {/* VALIDATION SIDEBAR (LEFT) */}
+                <div className="w-64 shrink-0 space-y-6 hidden lg:block">
+                    <div className={`p-4 rounded-xl shadow-lg border-2 ${
+                        validationStats?.status === 'success' ? 'bg-green-50 border-green-200' :
+                        validationStats?.status === 'warning' ? 'bg-yellow-50 border-yellow-200' : 'bg-red-50 border-red-200'
+                    }`}>
+                        <div className="flex items-center gap-2 mb-3 border-b border-black/10 pb-2">
+                            <FileSearch size={20} className={validationStats?.status === 'success' ? 'text-green-600' : validationStats?.status === 'warning' ? 'text-yellow-600' : 'text-red-600'} />
+                            <h3 className="font-bold text-sm text-slate-800">Quality Check</h3>
                         </div>
-                        <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2">
-                            {manuscriptData.figures.length === 0 && (<p className="text-center text-slate-400 text-sm py-4 italic">No figures added yet.</p>)}
-                            {manuscriptData.figures.map((fig) => (
-                                <div key={fig.id} className="flex gap-3 bg-white p-3 rounded shadow-sm border border-slate-100 relative group">
-                                    <img src={fig.fileUrl} className="w-16 h-16 object-cover rounded bg-slate-100" />
-                                    <div className="flex-1 min-w-0"><p className="text-xs font-bold text-slate-700 truncate">Figure {fig.id}</p><p className="text-[10px] text-slate-500 line-clamp-2 leading-tight">{fig.caption}</p></div>
-                                    <button onClick={() => handleRemoveFigure(fig.id)} className="absolute top-2 right-2 text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 size={14} /></button>
+                        
+                        {validationStats ? (
+                            <div className="space-y-4">
+                                <div>
+                                    <p className="text-xs text-slate-500 uppercase font-bold">Content Match</p>
+                                    <div className="flex items-end gap-2">
+                                        <span className={`text-2xl font-bold ${
+                                            validationStats.status === 'success' ? 'text-green-700' : 
+                                            validationStats.status === 'warning' ? 'text-yellow-700' : 'text-red-700'
+                                        }`}>{validationStats.coveragePercent}%</span>
+                                        <span className="text-xs text-slate-500 mb-1">of significant words found</span>
+                                    </div>
+                                    <div className="w-full bg-white h-2 rounded-full mt-1 border border-slate-100 overflow-hidden">
+                                        <div className={`h-full rounded-full ${
+                                            validationStats.status === 'success' ? 'bg-green-500' : 
+                                            validationStats.status === 'warning' ? 'bg-yellow-500' : 'bg-red-500'
+                                        }`} style={{width: `${validationStats.coveragePercent}%`}}></div>
+                                    </div>
                                 </div>
-                            ))}
-                        </div>
-                    </div>
 
-                    <div className="space-y-6 lg:col-span-1">
-                        <h3 className="font-bold text-slate-800 border-b pb-2 mb-4 flex items-center gap-2"><RefreshCw size={18} className="text-[#00B4DB]" /> Journal Branding</h3>
-                        <div className="bg-slate-50 p-4 rounded border border-slate-200 text-center"><label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">JBSH Logo</label>{manuscriptData.logoUrl ? (<img src={manuscriptData.logoUrl} className="h-16 mx-auto object-contain mb-3" />) : <div className="h-16 bg-slate-200 w-full mb-3"></div>}<div className="relative inline-block"><button className="text-[10px] bg-white border border-slate-300 px-3 py-1 rounded shadow-sm hover:bg-slate-50">Change Logo</button><input type="file" accept="image/*" onChange={handleLogoUpload} className="absolute inset-0 opacity-0 cursor-pointer" /></div></div>
-                        <div className="space-y-3 mt-6"><label className="block text-[10px] font-bold text-slate-500 uppercase">Publishing Dates</label><div className="grid grid-cols-1 gap-2"><div className="flex items-center gap-2"><span className="w-16 text-[10px] text-slate-500">Received:</span><input type="text" value={manuscriptData.receivedDate} onChange={(e) => handleUpdateField('receivedDate', e.target.value)} className="flex-1 border p-1.5 rounded text-xs" /></div><div className="flex items-center gap-2"><span className="w-16 text-[10px] text-slate-500">Accepted:</span><input type="text" value={manuscriptData.acceptedDate} onChange={(e) => handleUpdateField('acceptedDate', e.target.value)} className="flex-1 border p-1.5 rounded text-xs" /></div><div className="flex items-center gap-2"><span className="w-16 text-[10px] text-slate-500">Published:</span><input type="text" value={manuscriptData.publishedDate} onChange={(e) => handleUpdateField('publishedDate', e.target.value)} className="flex-1 border p-1.5 rounded text-xs" /></div></div></div>
-                        <div className="mt-8 pt-8 border-t"><button onClick={() => setAppState(AppState.PREVIEW)} className="w-full bg-[#0083B0] text-white py-3 rounded-lg font-bold hover:bg-[#007299] transition-colors flex items-center justify-center gap-2 shadow-lg text-lg">Generate Layout <ArrowRight size={20} /></button><button onClick={() => setAppState(AppState.UPLOAD)} className="w-full mt-3 py-2 text-slate-500 text-sm hover:text-slate-700">Cancel</button></div>
+                                <div className="grid grid-cols-2 gap-2 text-xs">
+                                    <div className="bg-white p-2 rounded border border-slate-100">
+                                        <p className="text-slate-400">Original</p>
+                                        <p className="font-bold text-slate-700">{validationStats.originalWordCount} words</p>
+                                    </div>
+                                    <div className="bg-white p-2 rounded border border-slate-100">
+                                        <p className="text-slate-400">Generated</p>
+                                        <p className="font-bold text-slate-700">{validationStats.generatedWordCount} words</p>
+                                    </div>
+                                </div>
+
+                                <div className={`text-xs p-2 rounded border flex gap-2 items-start ${
+                                    validationStats.status === 'success' ? 'bg-green-100 text-green-800 border-green-200' : 
+                                    validationStats.status === 'warning' ? 'bg-yellow-100 text-yellow-800 border-yellow-200' : 'bg-red-100 text-red-800 border-red-200'
+                                }`}>
+                                    {validationStats.status === 'success' ? <CheckCircle size={14} className="mt-0.5 shrink-0"/> : <AlertTriangle size={14} className="mt-0.5 shrink-0"/>}
+                                    <p>
+                                        {validationStats.status === 'success' ? "Excellent integrity. Most content preserved." :
+                                         validationStats.status === 'warning' ? "Good match, but check for missing paragraphs." :
+                                         "Significant content loss detected. Please review manually."}
+                                    </p>
+                                </div>
+                            </div>
+                        ) : (
+                            <p className="text-xs text-slate-400">Analyzing content...</p>
+                        )}
+                    </div>
+                </div>
+
+                {/* MAIN CONTENT FORM */}
+                <div className="flex-1 bg-white shadow-xl rounded-xl overflow-hidden">
+                    <div className="bg-slate-800 p-6 text-white flex justify-between items-center sticky top-0 z-40"><div><h2 className="text-2xl font-bold">Metadata & Assets Review</h2><p className="opacity-80 text-sm">Verify details and upload figures before generating the PDF.</p></div><div className="bg-[#00B4DB] px-4 py-1.5 rounded-full text-xs font-bold tracking-wide">JBSH EDITOR</div></div>
+                    <div className="p-8 grid grid-cols-1 lg:grid-cols-3 gap-8">
+                        <div className="space-y-6 lg:col-span-1 border-r border-slate-200 pr-0 lg:pr-6">
+                            <h3 className="font-bold text-slate-800 border-b pb-2 mb-4 flex items-center gap-2"><FileText size={18} className="text-[#00B4DB]" /> Article Metadata</h3>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Vol</label><input type="text" value={manuscriptData.volume} onChange={(e) => handleUpdateField('volume', e.target.value)} className="w-full border border-slate-300 p-2 rounded text-sm" /></div>
+                                <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Issue</label><input type="text" value={manuscriptData.issue} onChange={(e) => handleUpdateField('issue', e.target.value)} className="w-full border border-slate-300 p-2 rounded text-sm" /></div>
+                                <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Year</label><input type="text" value={manuscriptData.year} onChange={(e) => handleUpdateField('year', e.target.value)} className="w-full border border-slate-300 p-2 rounded text-sm" /></div>
+                                <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Pages</label><input type="text" value={manuscriptData.pages} onChange={(e) => handleUpdateField('pages', e.target.value)} className="w-full border border-slate-300 p-2 rounded text-sm" /></div>
+                            </div>
+                            <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">DOI</label><input type="text" value={manuscriptData.doi} onChange={(e) => handleUpdateField('doi', e.target.value)} className="w-full border border-slate-300 p-2 rounded text-sm" /></div>
+                            <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Title</label><textarea value={manuscriptData.title} onChange={(e) => handleUpdateField('title', e.target.value)} className="w-full border border-slate-300 p-2 rounded text-sm focus:ring-1 focus:ring-[#007398] outline-none" rows={3}/></div>
+                            <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Abstract</label><textarea value={manuscriptData.abstract} onChange={(e) => handleUpdateField('abstract', e.target.value)} className="w-full border border-slate-300 p-2 rounded text-sm focus:ring-1 focus:ring-[#007398] outline-none" rows={6}/></div>
+                        </div>
+
+                        <div className="space-y-6 lg:col-span-1 border-r border-slate-200 pr-0 lg:pr-6">
+                            <h3 className="font-bold text-slate-800 border-b pb-2 mb-4 flex items-center gap-2"><ImageIcon size={18} className="text-[#00B4DB]" /> Manuscript Figures</h3>
+                            <div className="bg-slate-50 p-4 rounded-lg border border-dashed border-slate-300">
+                                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">Add New Figure</label>
+                                <input type="text" placeholder="Figure Caption (e.g. Figure 1. Chart of growth)" className="w-full border p-2 rounded text-sm mb-2" value={newFigCaption} onChange={(e) => setNewFigCaption(e.target.value)}/>
+                                <div className="relative w-full"><button className="w-full bg-slate-200 text-slate-700 py-2 rounded text-sm font-medium hover:bg-slate-300 transition-colors flex items-center justify-center gap-2"><Plus size={16} /> Upload Image</button><input type="file" accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleAddFigure}/></div>
+                            </div>
+                            <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2">
+                                {manuscriptData.figures.length === 0 && (<p className="text-center text-slate-400 text-sm py-4 italic">No figures added yet.</p>)}
+                                {manuscriptData.figures.map((fig) => (
+                                    <div key={fig.id} className="flex gap-3 bg-white p-3 rounded shadow-sm border border-slate-100 relative group">
+                                        <img src={fig.fileUrl} className="w-16 h-16 object-cover rounded bg-slate-100" />
+                                        <div className="flex-1 min-w-0"><p className="text-xs font-bold text-slate-700 truncate">Figure {fig.id}</p><p className="text-[10px] text-slate-500 line-clamp-2 leading-tight">{fig.caption}</p></div>
+                                        <button onClick={() => handleRemoveFigure(fig.id)} className="absolute top-2 right-2 text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 size={14} /></button>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="space-y-6 lg:col-span-1">
+                            <h3 className="font-bold text-slate-800 border-b pb-2 mb-4 flex items-center gap-2"><RefreshCw size={18} className="text-[#00B4DB]" /> Journal Branding</h3>
+                            <div className="bg-slate-50 p-4 rounded border border-slate-200 text-center"><label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">JBSH Logo</label>{manuscriptData.logoUrl ? (<img src={manuscriptData.logoUrl} className="h-16 mx-auto object-contain mb-3" />) : <div className="h-16 bg-slate-200 w-full mb-3"></div>}<div className="relative inline-block"><button className="text-[10px] bg-white border border-slate-300 px-3 py-1 rounded shadow-sm hover:bg-slate-50">Change Logo</button><input type="file" accept="image/*" onChange={handleLogoUpload} className="absolute inset-0 opacity-0 cursor-pointer" /></div></div>
+                            <div className="space-y-3 mt-6"><label className="block text-[10px] font-bold text-slate-500 uppercase">Publishing Dates</label><div className="grid grid-cols-1 gap-2"><div className="flex items-center gap-2"><span className="w-16 text-[10px] text-slate-500">Received:</span><input type="text" value={manuscriptData.receivedDate} onChange={(e) => handleUpdateField('receivedDate', e.target.value)} className="flex-1 border p-1.5 rounded text-xs" /></div><div className="flex items-center gap-2"><span className="w-16 text-[10px] text-slate-500">Accepted:</span><input type="text" value={manuscriptData.acceptedDate} onChange={(e) => handleUpdateField('acceptedDate', e.target.value)} className="flex-1 border p-1.5 rounded text-xs" /></div><div className="flex items-center gap-2"><span className="w-16 text-[10px] text-slate-500">Published:</span><input type="text" value={manuscriptData.publishedDate} onChange={(e) => handleUpdateField('publishedDate', e.target.value)} className="flex-1 border p-1.5 rounded text-xs" /></div></div></div>
+                            <div className="mt-8 pt-8 border-t"><button onClick={() => setAppState(AppState.PREVIEW)} className="w-full bg-[#0083B0] text-white py-3 rounded-lg font-bold hover:bg-[#007299] transition-colors flex items-center justify-center gap-2 shadow-lg text-lg">Generate Layout <ArrowRight size={20} /></button><button onClick={() => setAppState(AppState.UPLOAD)} className="w-full mt-3 py-2 text-slate-500 text-sm hover:text-slate-700">Cancel</button></div>
+                        </div>
                     </div>
                 </div>
              </div>

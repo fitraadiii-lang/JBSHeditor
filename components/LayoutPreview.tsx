@@ -1,5 +1,5 @@
 import React from 'react';
-import { ManuscriptData } from '../types';
+import { ManuscriptData, ManuscriptFigure } from '../types';
 import { Lock, Unlock, ArrowUp, ArrowDown, Trash2 } from 'lucide-react';
 
 interface LayoutPreviewProps {
@@ -28,34 +28,127 @@ export const LayoutPreview: React.FC<LayoutPreviewProps> = ({
   const runningHeadJournal = `J. Biomed. Sci. Health. ${data.year}; ${data.volume}(${data.issue}): ${data.pages}`;
 
   // --- AUTHOR AFFILIATION GROUPING LOGIC ---
-  // 1. Get unique affiliations
   const uniqueAffiliations = Array.from(new Set(data.authors.map(a => a.affiliation)));
-  
-  // 2. Helper to get index (1-based) for an author's affiliation
   const getAffiliationIndex = (affiliation: string) => {
       return uniqueAffiliations.indexOf(affiliation) + 1;
   };
 
-  // --- ABSTRACT FORMATTING LOGIC ---
-  // Bold specific keywords: Purpose, Method(s), Result(s), Conclusion(s), Objective(s)
+  // --- ABSTRACT FORMATTING ---
   const formatAbstract = (text: string) => {
       if (!text) return "";
-      // Regex to find keywords at start of string or after space/punctuation, preserving case
-      // Matches: "Purpose:", "Methods.", "Results ", etc.
       return text.replace(/(^|\s|\.|;)(Purpose|Objectives?|Methods?|Results?|Conclusions?)([:.]?)/gim, '$1<span class="font-bold">$2$3</span>');
   };
+
+  // --- FIGURE INJECTION LOGIC ---
+  // We track which figures are placed inline to avoid duplicating them at the bottom
+  const placedFigureIds = new Set<string>();
+
+  const injectFigures = (content: string, figures: ManuscriptFigure[]) => {
+      if (!figures || figures.length === 0) return content;
+      
+      // Split content by paragraphs to insert figures *between* paragraphs
+      // We look for </p> or <br><br> or just newlines if it's plain text, but standard is HTML
+      // Fallback: if no <p> tags found, treat as one block
+      const hasPTags = content.includes('</p>');
+      
+      if (!hasPTags) {
+          // Try to split by double newlines or breaks if plain text
+          // This ensures figures work even if AI returned Markdown-like text
+          const parts = content.split(/\n\n+/);
+          if (parts.length <= 1) return content;
+          
+          let newContent = "";
+          parts.forEach((part) => {
+              if (!part.trim()) return;
+              newContent += part + "\n\n";
+              
+              const regex = /(?:Figure|Fig\.?)\s*(\d+)/gi;
+              let match;
+              while ((match = regex.exec(part)) !== null) {
+                  const figId = match[1];
+                  if (!placedFigureIds.has(figId)) {
+                      const fig = figures.find(f => f.id === figId);
+                      if (fig) {
+                          placedFigureIds.add(figId);
+                          newContent += `
+                            <div class="figure-container my-6 text-center page-break-inside-avoid">
+                               <div class="bg-slate-50 inline-block p-2 border border-slate-100 rounded">
+                                  <img src="${fig.fileUrl}" alt="${fig.caption}" class="max-h-[400px] max-w-full w-auto mx-auto object-contain mb-2" />
+                               </div>
+                               <div class="mt-2 px-8">
+                                  <span class="text-[9pt] font-bold font-sans-journal text-[#005580]">Figure ${fig.id}: </span>
+                                  <span class="text-[9pt] text-slate-600 font-sans-journal leading-tight">${fig.caption}</span>
+                               </div>
+                            </div>
+                          `;
+                      }
+                  }
+              }
+          });
+          return newContent;
+      }
+
+      const parts = content.split(/<\/p>/i);
+      let newContent = "";
+
+      parts.forEach((part, index) => {
+          if (part.trim() === "") return;
+
+          // Re-add the closing tag stripped by split
+          const paraContent = part + "</p>";
+          newContent += paraContent;
+
+          // Check for Figure mentions in this paragraph
+          // Regex looks for "Figure 1", "Fig. 1", case insensitive
+          const regex = /(?:Figure|Fig\.?)\s*(\d+)/gi;
+          let match;
+          while ((match = regex.exec(part)) !== null) {
+              const figId = match[1];
+              if (!placedFigureIds.has(figId)) {
+                  const fig = figures.find(f => f.id === figId);
+                  if (fig) {
+                      placedFigureIds.add(figId);
+                      // Inject Figure HTML
+                      // Use inline styles or Tailwind classes matching the main app style
+                      newContent += `
+                        <div class="figure-container my-6 text-center page-break-inside-avoid">
+                           <div class="bg-slate-50 inline-block p-2 border border-slate-100 rounded">
+                              <img src="${fig.fileUrl}" alt="${fig.caption}" class="max-h-[400px] max-w-full w-auto mx-auto object-contain mb-2" />
+                           </div>
+                           <div class="mt-2 px-8">
+                              <span class="text-[9pt] font-bold font-sans-journal text-[#005580]">Figure ${fig.id}: </span>
+                              <span class="text-[9pt] text-slate-600 font-sans-journal leading-tight">${fig.caption}</span>
+                           </div>
+                        </div>
+                      `;
+                  }
+              }
+          }
+      });
+      
+      return newContent;
+  };
+
+  // Pre-process sections to inject figures
+  const processedSections = data.sections.map(section => ({
+      ...section,
+      content: injectFigures(section.content, data.figures)
+  }));
+
+  // Identify remaining figures that were NOT mentioned in text
+  const remainingFigures = data.figures.filter(f => !placedFigureIds.has(f.id));
 
   return (
     <div className="w-full max-w-[210mm] mx-auto bg-white shadow-2xl min-h-[297mm] text-slate-900 font-serif-journal relative flex flex-col justify-between print:shadow-none print:w-full print:max-w-none print:m-0 print:p-0">
       
-      {/* --- VISUALIZATION OF RUNNING HEADER (Page 2+) --- */}
+      {/* --- HEADER VISUALIZATION (Page 2+) --- */}
       <div className="absolute top-0 left-0 w-full px-[20mm] py-4 border-b border-slate-300 flex justify-between items-center text-[8pt] text-slate-500 font-sans-journal italic bg-slate-50 print:hidden opacity-70 hover:opacity-100 transition-opacity">
           <span className="font-semibold text-slate-400 no-print uppercase text-[7pt] tracking-widest absolute -top-3 left-[20mm] bg-slate-100 px-2 rounded-b border border-t-0 border-slate-200">Page 2+ Header Preview</span>
           <span>{citationAuthors}</span>
           <span>{runningHeadJournal}</span>
       </div>
 
-      {/* Content Container - A4 Padding */}
+      {/* Content Container */}
       <div className="p-[20mm] flex-grow pt-[25mm]"> 
 
         {/* 1. Header Section */}
@@ -102,7 +195,7 @@ export const LayoutPreview: React.FC<LayoutPreviewProps> = ({
                 {data.title}
             </h2>
 
-            {/* Authors with GROUPED Superscript */}
+            {/* Authors */}
             <div className="text-[12pt] font-bold text-slate-900 mb-3">
                 {data.authors.map((author, index) => {
                     const affNum = getAffiliationIndex(author.affiliation);
@@ -119,7 +212,7 @@ export const LayoutPreview: React.FC<LayoutPreviewProps> = ({
                 })}
             </div>
 
-            {/* Unique Affiliations List */}
+            {/* Affiliations */}
             <div className="text-[9pt] italic text-slate-700 leading-tight px-8 mb-3 flex flex-col items-center gap-1">
                 {uniqueAffiliations.map((aff, index) => (
                     <div key={index}>
@@ -135,7 +228,7 @@ export const LayoutPreview: React.FC<LayoutPreviewProps> = ({
             </div>
         </div>
 
-        {/* 5. Abstract Section */}
+        {/* 5. Abstract */}
         <div className="mb-8 relative z-10">
             <div className="bg-slate-50 border border-slate-200 rounded-lg p-6 relative shadow-sm">
                 <div className="absolute top-0 left-6 right-6 h-[3px] bg-[#005580] rounded-b-sm"></div>
@@ -143,7 +236,6 @@ export const LayoutPreview: React.FC<LayoutPreviewProps> = ({
                 <div 
                     className={`text-justify text-[9.5pt] leading-relaxed text-slate-800 font-serif-journal mb-4 ${isEditable ? 'editable-highlight' : ''}`}
                     contentEditable={isEditable}
-                    // IMPORTANT: When editing, we get innerText (plain), but when rendering, we inject HTML to show BOLD keywords.
                     onBlur={(e) => onUpdateField && onUpdateField('abstract', e.currentTarget.innerText)}
                     dangerouslySetInnerHTML={{ __html: formatAbstract(data.abstract) }}
                 />
@@ -155,7 +247,7 @@ export const LayoutPreview: React.FC<LayoutPreviewProps> = ({
             </div>
         </div>
 
-        {/* 6. Dates Line */}
+        {/* 6. Dates */}
         <div className="text-[8.5pt] text-slate-700 border-t border-slate-200 pt-2 mb-4 font-sans-journal flex flex-wrap gap-x-4 gap-y-1 justify-center bg-white">
             <span><span className="font-bold text-[#005580]">Received:</span> {data.receivedDate}</span>
             <span className="text-slate-300">|</span>
@@ -166,12 +258,12 @@ export const LayoutPreview: React.FC<LayoutPreviewProps> = ({
             <span><span className="font-bold text-[#005580]">Published:</span> {data.publishedDate}</span>
         </div>
 
-        {/* 7. Cite This Article */}
+        {/* 7. Cite */}
         <div className="bg-blue-50/50 border-l-[4px] border-[#005580] p-3 mb-4 text-[8.5pt] text-slate-700 font-serif-journal text-justify">
              <span className="font-bold text-[#005580] font-sans-journal">Cite this article:</span> {citationAuthors} ({data.year}). {data.title}. <i>Journal of Biomedical Sciences and Health</i>, {data.volume}({data.issue}), {data.pages}. https://doi.org/{data.doi}
         </div>
 
-        {/* 8. CC License */}
+        {/* 8. License */}
         <div className="flex items-start gap-3 p-3 border border-slate-200 rounded-md bg-white mb-8">
              <div className="text-slate-600 bg-slate-100 p-1.5 rounded-full mt-0.5 shrink-0">
                 <Unlock size={16} />
@@ -181,16 +273,14 @@ export const LayoutPreview: React.FC<LayoutPreviewProps> = ({
              </p>
         </div>
 
-        {/* 9. Main Body (2 Columns) */}
-        {/* We use manuscript-content class to target table styling */}
+        {/* 9. Main Body */}
         <div className="columns-2 gap-6 text-justify leading-relaxed text-[10pt] font-serif-journal text-slate-900 manuscript-content">
-            {/* Sections */}
-            {data.sections.map((section, idx) => (
+            {/* Sections with INJECTED figures */}
+            {processedSections.map((section, idx) => (
             <div key={idx} className="mb-6">
                 <h3 className="text-[10pt] font-bold text-slate-900 mb-2 mt-4 first:mt-0 uppercase tracking-tight">
                     {section.heading}
                 </h3>
-                {/* DANGEROUSLY SET HTML to render Tables properly */}
                 <div 
                     className={`whitespace-pre-wrap ${isEditable ? 'editable-highlight' : ''}`}
                     contentEditable={isEditable}
@@ -200,18 +290,16 @@ export const LayoutPreview: React.FC<LayoutPreviewProps> = ({
             </div>
             ))}
 
-            {/* Figures */}
-            {data.figures && data.figures.length > 0 && (
+            {/* Fallback for Remaining Figures (not mentioned in text) */}
+            {remainingFigures.length > 0 && (
                 <div className="col-span-all py-6 border-y border-slate-100 my-4 bg-slate-50/50 relative">
-                    {isEditable && <div className="absolute top-0 right-0 bg-yellow-400 text-xs px-2 py-1 font-bold rounded-bl shadow no-print">EDIT MODE: Reorder Figures</div>}
+                    <p className="text-xs font-bold text-slate-400 mb-2 uppercase text-center w-full block">Additional Figures</p>
                     
-                    {data.figures.map((fig, idx) => (
-                        <div key={fig.id} className="mb-6 last:mb-0 p-2 bg-white text-center shadow-sm border border-slate-200 mx-auto max-w-[80%] relative group">
+                    {remainingFigures.map((fig, idx) => (
+                        <div key={fig.id} className="mb-6 last:mb-0 p-2 bg-white text-center shadow-sm border border-slate-200 mx-auto max-w-[80%] relative group page-break-inside-avoid">
                             
                             {isEditable && (
                                 <div className="absolute top-2 right-2 flex gap-1 z-20 no-print">
-                                    <button onClick={() => onUpdateFigureOrder && onUpdateFigureOrder(idx, 'up')} className="p-1 bg-white border border-slate-300 rounded hover:bg-slate-100 shadow-sm" disabled={idx === 0}><ArrowUp size={14} /></button>
-                                    <button onClick={() => onUpdateFigureOrder && onUpdateFigureOrder(idx, 'down')} className="p-1 bg-white border border-slate-300 rounded hover:bg-slate-100 shadow-sm" disabled={idx === data.figures.length - 1}><ArrowDown size={14} /></button>
                                     <button onClick={() => onRemoveFigure && onRemoveFigure(fig.id)} className="p-1 bg-red-50 border border-red-200 rounded hover:bg-red-100 shadow-sm ml-1"><Trash2 size={14} className="text-red-500" /></button>
                                 </div>
                             )}
@@ -232,14 +320,13 @@ export const LayoutPreview: React.FC<LayoutPreviewProps> = ({
             <div className="col-span-all mt-4 pt-4 border-t border-slate-300">
                 <h3 className="text-[10pt] font-bold text-slate-900 mb-3 uppercase">References</h3>
                 <div className="columns-2 gap-6">
-                    <ul className="text-[9pt] space-y-1.5 text-slate-700 font-sans-journal">
+                    <div className="text-[9pt] text-slate-700 font-serif-journal">
                     {data.references.map((ref, i) => (
-                        <li key={i} className="pl-6 -indent-6 relative leading-tight break-inside-avoid text-justify">
-                            <span className="absolute left-0 text-slate-500 font-bold text-[8pt] top-[2px]">{i + 1}.</span>
+                        <div key={i} className="apa-reference">
                             {ref}
-                        </li>
+                        </div>
                     ))}
-                    </ul>
+                    </div>
                 </div>
             </div>
         </div>
