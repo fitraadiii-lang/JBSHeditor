@@ -38,16 +38,19 @@ export const parseManuscript = async (text: string): Promise<ManuscriptData> => 
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   const prompt = `
-    You are an expert academic editor for the journal 'JBSH' (Journal of Biomedical Sciences and Health).
-    Your task is to take the following raw manuscript (which may contain HTML tags) and structure it into a JSON format suitable for a professional academic journal publication.
+    You are a strict Document Parser and Formatter for the journal 'JBSH'.
+    Your ONLY task is to structure the raw manuscript into JSON.
     
-    CRITICAL INSTRUCTION: 
-    1. DO NOT SUMMARIZE. You must retain the FULL content of the manuscript sections. Output all paragraphs exactly as provided.
-    2. **TABLES**: If the input contains HTML tables (<table>), YOU MUST PRESERVE THEM EXACTLY in the 'content' field. Do not convert them to text. We need the HTML structure for formatting.
-    3. Extract the Title, Authors (with affiliations), Abstract, and Keywords.
-    4. Identify the main sections (Introduction, Literature Review, Methods, Results, Discussion, Conclusion).
-    5. Clean the text content. Remove page numbers, running heads, or artifacts from the raw file.
-    6. Extract the references list. Format each reference string strictly according to APA 7th Edition style (e.g., Author, A. A. (Year). Title. Source.).
+    CRITICAL RULES FOR CONTENT PRESERVATION (STRICT VERBATIM MODE):
+    1. **NO SUMMARIZATION**: You are FORBIDDEN from shortening any text.
+    2. **NO EDITING**: Do not fix grammar, do not improve style, do not remove redundancy. Copy the text EXACTLY as it appears in the body paragraphs.
+    3. **PRESERVE HTML**: If the input contains HTML tables (<table>), YOU MUST PRESERVE THEM EXACTLY.
+    4. **CLEAN NOISE ONLY**: Only remove obvious artifacts like page numbers ("Page 1 of 5"), running heads, or "Insert Figure 1 Here" placeholders. Do NOT remove actual content sentences.
+    
+    Structure Requirements:
+    - Extract Title, Authors (with affiliations), Abstract, and Keywords.
+    - Organize body text into Sections (Introduction, Methods, Results, Discussion, Conclusion).
+    - Extract References list formatted strictly in APA 7th style.
 
     Raw Manuscript Content:
     ${text}
@@ -60,7 +63,7 @@ export const parseManuscript = async (text: string): Promise<ManuscriptData> => 
       config: {
         responseMimeType: "application/json",
         responseSchema: manuscriptSchema,
-        systemInstruction: "You are a precise document parser. Your input is converted HTML. You must output clean HTML in the content fields where applicable (especially for tables).",
+        systemInstruction: "You are a robotic parser. Your goal is 100% data fidelity. Output the input text word-for-word into the correct JSON fields. Do not act as an editor.",
       },
     });
 
