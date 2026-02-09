@@ -343,21 +343,19 @@ const App: React.FC = () => {
       }
   };
 
-  const getImageBuffer = async (url: string): Promise<{ data: ArrayBuffer, extension: "png" | "jpg" | "gif" | "bmp" }> => {
+  const getImageBuffer = async (url: string): Promise<{ data: ArrayBuffer; type: "png" | "jpeg" | "gif" | "bmp" | "svg" }> => {
       try {
           const response = await fetch(url);
           const blob = await response.blob();
           const data = await blob.arrayBuffer();
+          let type: "png" | "jpeg" | "gif" | "bmp" | "svg" = "png";
           const mime = blob.type.toLowerCase();
-          let extension: "png" | "jpg" | "gif" | "bmp" = "png";
+          if (mime.includes("jpeg") || mime.includes("jpg")) type = "jpeg";
+          else if (mime.includes("gif")) type = "gif";
+          else if (mime.includes("bmp")) type = "bmp";
+          else if (mime.includes("svg")) type = "svg";
           
-          if (mime.includes("jpeg") || mime.includes("jpg")) extension = "jpg";
-          else if (mime.includes("gif")) extension = "gif";
-          else if (mime.includes("bmp")) extension = "bmp";
-          // We ignore SVG for now to prevent types error (requires fallback for docx)
-          // else if (mime.includes("svg")) extension = "svg";
-
-          return { data, extension };
+          return { data, type };
       } catch (e) {
           console.error("Failed to fetch image for docx", e);
           throw new Error("Image fetch failed");
@@ -393,13 +391,14 @@ const App: React.FC = () => {
         let logoImageRun: any = new Paragraph("");
         if (manuscriptData.logoUrl) {
             try {
-                const { data: logoBuffer, extension: logoExt } = await getImageBuffer(manuscriptData.logoUrl);
-                // Note: ImageRun automatically detects type from buffer signature in docx v8.x
+                const { data: logoBuffer, type: logoType } = await getImageBuffer(manuscriptData.logoUrl);
+                // Note: ImageRun automatically detects type from buffer signature in docx v8.x, but explicitly setting it satisfies TS
                 logoImageRun = new Paragraph({
                     children: [
                         new ImageRun({
                             data: new Uint8Array(logoBuffer),
-                            transformation: { width: 76, height: 76 }
+                            transformation: { width: 76, height: 76 },
+                            type: logoType
                         })
                     ]
                 });
@@ -571,11 +570,11 @@ const App: React.FC = () => {
         
         let unlockIconRun: any = new Paragraph(""); 
         try { 
-            const { data: unlockBuffer, extension: unlockExt } = await getImageBuffer(UNLOCK_ICON_URL); 
+            const { data: unlockBuffer, type: unlockType } = await getImageBuffer(UNLOCK_ICON_URL); 
             unlockIconRun = new ImageRun({ 
                 data: new Uint8Array(unlockBuffer), 
-                transformation: { width: 15, height: 15 }
-              
+                transformation: { width: 15, height: 15 },
+                type: unlockType
             }); 
         } catch(e) { console.warn("Unlock icon fetch failed", e); }
         
@@ -627,11 +626,11 @@ const App: React.FC = () => {
                              
                              let figRun: any = new TextRun(`[Image: ${fig.caption}]`);
                              try {
-                                  const { data: buf, extension: figExt } = await getImageBuffer(fig.fileUrl);
+                                  const { data: buf, type: imgType } = await getImageBuffer(fig.fileUrl);
                                   figRun = new ImageRun({ 
                                       data: new Uint8Array(buf), 
-                                      transformation: { width: 300, height: 300 }
-                                
+                                      transformation: { width: 300, height: 300 },
+                                      type: imgType
                                   });
                              } catch(e) { console.error(e) }
                              
@@ -650,11 +649,11 @@ const App: React.FC = () => {
             for (const fig of remainingFigures) {
                 let figRun: any = new TextRun(`[Image: ${fig.caption}]`);
                 try {
-                     const { data: buf, extension: figExt } = await getImageBuffer(fig.fileUrl);
+                     const { data: buf, type: imgType } = await getImageBuffer(fig.fileUrl);
                      figRun = new ImageRun({ 
                          data: new Uint8Array(buf), 
-                         transformation: { width: 300, height: 300 }
-                         
+                         transformation: { width: 300, height: 300 },
+                         type: imgType
                      });
                 } catch(e) { console.error(e) }
                 bodyChildren.push( new Paragraph({ children: [figRun], alignment: AlignmentType.CENTER, spacing: { before: 100 } }), new Paragraph({ children: [ new TextRun({ text: `Figure ${fig.id}: `, bold: true, color: journalBlue, font: "Arial", size: 18 }), new TextRun({ text: fig.caption, font: "Arial", size: 18 }) ], alignment: AlignmentType.CENTER, spacing: { before: 50, after: 300 } }) );
