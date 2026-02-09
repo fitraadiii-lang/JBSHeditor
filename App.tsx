@@ -343,19 +343,13 @@ const App: React.FC = () => {
       }
   };
 
-  const getImageBuffer = async (url: string): Promise<{ data: ArrayBuffer; type: "png" | "jpeg" | "gif" | "bmp" | "svg" }> => {
+  const getImageBuffer = async (url: string): Promise<{ data: ArrayBuffer }> => {
       try {
           const response = await fetch(url);
           const blob = await response.blob();
           const data = await blob.arrayBuffer();
-          let type: "png" | "jpeg" | "gif" | "bmp" | "svg" = "png";
-          const mime = blob.type.toLowerCase();
-          if (mime.includes("jpeg") || mime.includes("jpg")) type = "jpeg";
-          else if (mime.includes("gif")) type = "gif";
-          else if (mime.includes("bmp")) type = "bmp";
-          else if (mime.includes("svg")) type = "svg";
-          
-          return { data, type };
+          // We ignore type detection here as docx handles it from magic bytes
+          return { data };
       } catch (e) {
           console.error("Failed to fetch image for docx", e);
           throw new Error("Image fetch failed");
@@ -391,15 +385,14 @@ const App: React.FC = () => {
         let logoImageRun: any = new Paragraph("");
         if (manuscriptData.logoUrl) {
             try {
-                const { data: logoBuffer, type: logoType } = await getImageBuffer(manuscriptData.logoUrl);
-                // Note: ImageRun automatically detects type from buffer signature in docx v8.x, but explicitly setting it satisfies TS
+                const { data: logoBuffer } = await getImageBuffer(manuscriptData.logoUrl);
+                // Note: ImageRun automatically detects type from buffer signature in docx v8.x
                 logoImageRun = new Paragraph({
                     children: [
                         new ImageRun({
                             data: new Uint8Array(logoBuffer),
-                            transformation: { width: 76, height: 76 },
-                            type: logoType
-                        })
+                            transformation: { width: 76, height: 76 }
+                        } as any)
                     ]
                 });
             } catch (e) {
@@ -570,12 +563,11 @@ const App: React.FC = () => {
         
         let unlockIconRun: any = new Paragraph(""); 
         try { 
-            const { data: unlockBuffer, type: unlockType } = await getImageBuffer(UNLOCK_ICON_URL); 
+            const { data: unlockBuffer } = await getImageBuffer(UNLOCK_ICON_URL); 
             unlockIconRun = new ImageRun({ 
                 data: new Uint8Array(unlockBuffer), 
-                transformation: { width: 15, height: 15 },
-                type: unlockType
-            }); 
+                transformation: { width: 15, height: 15 }
+            } as any); 
         } catch(e) { console.warn("Unlock icon fetch failed", e); }
         
         const openAccessBoxTable = new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, borders: { top: { style: BorderStyle.SINGLE, color: "CCCCCC", size: 2 }, bottom: { style: BorderStyle.SINGLE, color: "CCCCCC", size: 2 }, left: { style: BorderStyle.SINGLE, color: "CCCCCC", size: 2 }, right: { style: BorderStyle.SINGLE, color: "CCCCCC", size: 2 }, insideVertical: { style: BorderStyle.NONE } }, rows: [ new TableRow({ children: [ new TableCell({ width: { size: 5, type: WidthType.PERCENTAGE }, children: [ new Paragraph({ children: [unlockIconRun], alignment: AlignmentType.CENTER }) ], verticalAlign: VerticalAlign.CENTER, shading: { fill: "F3F4F6", type: ShadingType.CLEAR } }), new TableCell({ width: { size: 95, type: WidthType.PERCENTAGE }, children: [ new Paragraph({ children: [ new TextRun({ text: "Open Access. ", bold: true, color: journalBlue, font: "Arial", size: 16 }), new TextRun({ text: "This article is an open access article distributed under the terms and conditions of the Creative Commons Attribution 4.0 International License (CC BY 4.0).", font: "Arial", size: 16 }) ], alignment: AlignmentType.JUSTIFIED }) ], margins: { top: 100, bottom: 100, left: 100, right: 100 }, verticalAlign: VerticalAlign.CENTER }) ] }) ] });
@@ -626,12 +618,11 @@ const App: React.FC = () => {
                              
                              let figRun: any = new TextRun(`[Image: ${fig.caption}]`);
                              try {
-                                  const { data: buf, type: imgType } = await getImageBuffer(fig.fileUrl);
+                                  const { data: buf } = await getImageBuffer(fig.fileUrl);
                                   figRun = new ImageRun({ 
                                       data: new Uint8Array(buf), 
-                                      transformation: { width: 300, height: 300 },
-                                      type: imgType
-                                  });
+                                      transformation: { width: 300, height: 300 }
+                                  } as any);
                              } catch(e) { console.error(e) }
                              
                              bodyChildren.push(new Paragraph({ children: [figRun], alignment: AlignmentType.CENTER, spacing: { before: 100 } }));
@@ -649,12 +640,11 @@ const App: React.FC = () => {
             for (const fig of remainingFigures) {
                 let figRun: any = new TextRun(`[Image: ${fig.caption}]`);
                 try {
-                     const { data: buf, type: imgType } = await getImageBuffer(fig.fileUrl);
+                     const { data: buf } = await getImageBuffer(fig.fileUrl);
                      figRun = new ImageRun({ 
                          data: new Uint8Array(buf), 
-                         transformation: { width: 300, height: 300 },
-                         type: imgType
-                     });
+                         transformation: { width: 300, height: 300 }
+                     } as any);
                 } catch(e) { console.error(e) }
                 bodyChildren.push( new Paragraph({ children: [figRun], alignment: AlignmentType.CENTER, spacing: { before: 100 } }), new Paragraph({ children: [ new TextRun({ text: `Figure ${fig.id}: `, bold: true, color: journalBlue, font: "Arial", size: 18 }), new TextRun({ text: fig.caption, font: "Arial", size: 18 }) ], alignment: AlignmentType.CENTER, spacing: { before: 50, after: 300 } }) );
             }
