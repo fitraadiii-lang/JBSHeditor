@@ -400,7 +400,6 @@ const App: React.FC = () => {
                         new ImageRun({
                             data: new Uint8Array(logoBuffer),
                             transformation: { width: 76, height: 76 }
-                            
                         })
                     ]
                 });
