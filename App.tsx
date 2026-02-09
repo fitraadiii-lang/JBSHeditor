@@ -399,8 +399,8 @@ const App: React.FC = () => {
                     children: [
                         new ImageRun({
                             data: new Uint8Array(logoBuffer),
-                            transformation: { width: 76, height: 76 },
-                            type: logoExt
+                            transformation: { width: 76, height: 76 }
+                            
                         })
                     ]
                 });
@@ -575,8 +575,8 @@ const App: React.FC = () => {
             const { data: unlockBuffer, extension: unlockExt } = await getImageBuffer(UNLOCK_ICON_URL); 
             unlockIconRun = new ImageRun({ 
                 data: new Uint8Array(unlockBuffer), 
-                transformation: { width: 15, height: 15 },
-                type: unlockExt
+                transformation: { width: 15, height: 15 }
+              
             }); 
         } catch(e) { console.warn("Unlock icon fetch failed", e); }
         
@@ -631,8 +631,8 @@ const App: React.FC = () => {
                                   const { data: buf, extension: figExt } = await getImageBuffer(fig.fileUrl);
                                   figRun = new ImageRun({ 
                                       data: new Uint8Array(buf), 
-                                      transformation: { width: 300, height: 300 },
-                                      type: figExt
+                                      transformation: { width: 300, height: 300 }
+                                
                                   });
                              } catch(e) { console.error(e) }
                              
@@ -654,8 +654,8 @@ const App: React.FC = () => {
                      const { data: buf, extension: figExt } = await getImageBuffer(fig.fileUrl);
                      figRun = new ImageRun({ 
                          data: new Uint8Array(buf), 
-                         transformation: { width: 300, height: 300 },
-                         type: figExt
+                         transformation: { width: 300, height: 300 }
+                         
                      });
                 } catch(e) { console.error(e) }
                 bodyChildren.push( new Paragraph({ children: [figRun], alignment: AlignmentType.CENTER, spacing: { before: 100 } }), new Paragraph({ children: [ new TextRun({ text: `Figure ${fig.id}: `, bold: true, color: journalBlue, font: "Arial", size: 18 }), new TextRun({ text: fig.caption, font: "Arial", size: 18 }) ], alignment: AlignmentType.CENTER, spacing: { before: 50, after: 300 } }) );
