@@ -440,7 +440,6 @@ const App: React.FC = () => {
             unlockIconRun = new ImageRun({ 
                 data: new Uint8Array(unlockBuffer), 
                 transformation: { width: 15, height: 15 },
-                type: unlockType
             });
         } catch(e) { console.warn("Unlock icon fetch failed", e); }
 
