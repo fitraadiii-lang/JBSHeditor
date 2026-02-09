@@ -168,11 +168,22 @@ const App: React.FC = () => {
       }
   };
 
-  const getImageBuffer = async (url: string): Promise<ArrayBuffer> => {
+  // Revised helper to get image data AND type for docx
+  const getImageData = async (url: string): Promise<{ data: ArrayBuffer, type: "png" | "jpeg" | "gif" | "bmp" | "svg" }> => {
       try {
           const response = await fetch(url);
           const blob = await response.blob();
-          return await blob.arrayBuffer();
+          const buffer = await blob.arrayBuffer();
+          
+          let type: "png" | "jpeg" | "gif" | "bmp" | "svg" = "png";
+          const mime = blob.type.toLowerCase();
+          
+          if (mime.includes("jpeg") || mime.includes("jpg")) type = "jpeg";
+          else if (mime.includes("gif")) type = "gif";
+          else if (mime.includes("bmp")) type = "bmp";
+          else if (mime.includes("svg")) type = "svg";
+          
+          return { data: buffer, type };
       } catch (e) {
           console.error("Failed to fetch image for docx", e);
           throw new Error("Image fetch failed");
@@ -208,14 +219,14 @@ const App: React.FC = () => {
         let logoImageRun: any = new Paragraph("");
         if (manuscriptData.logoUrl) {
             try {
-                const logoBuffer = await getImageBuffer(manuscriptData.logoUrl);
-                const isPng = manuscriptData.logoUrl.toLowerCase().includes("png") || manuscriptData.logoUrl.toLowerCase().includes("image/png");
+                const { data: logoBuffer, type: logoType } = await getImageData(manuscriptData.logoUrl);
+                // Note: ImageRun automatically detects type from buffer signature in docx v8.x
                 logoImageRun = new Paragraph({
                     children: [
                         new ImageRun({
                             data: new Uint8Array(logoBuffer),
                             transformation: { width: 76, height: 76 },
-                            type: isPng ? "png" : "jpeg"
+                            type: logoType
                         })
                     ]
                 });
@@ -395,7 +406,8 @@ const App: React.FC = () => {
         const citationAuthors = manuscriptData.authors.length > 2 ? `${manuscriptData.authors[0].name} et al.` : manuscriptData.authors.map(a => a.name).join(' & ');
         const citationTable = new Table({
              width: { size: 100, type: WidthType.PERCENTAGE },
-             borders: { top: { style: BorderStyle.NONE }, bottom: { style: BorderStyle.NONE }, right: { style: BorderStyle.NONE }, left: { style: BorderStyle.SINGLE, size: 24, color: journalBlue }, insideVertical: { style: BorderStyle.NONE }, insideHorizontal: { style: BorderStyle.NONE } },
+             borders: { top: { style: BorderStyle.NONE }, bottom: { style: BorderStyle.NONE }, right: { style: BorderStyle.NONE }, left: { style: BorderStyle.SINGLE, size: 24, color: journalBlue }, insideVertical: { style: BorderStyle.NONE }, insideHorizontal: { style: BorderStyle.NONE },
+             },
              rows: [
                  new TableRow({
                      children: [
@@ -424,11 +436,11 @@ const App: React.FC = () => {
         // 11. Open Access Statement Box
         let unlockIconRun: any = new Paragraph("");
         try {
-            const unlockBuffer = await getImageBuffer(UNLOCK_ICON_URL);
+            const { data: unlockBuffer, type: unlockType } = await getImageData(UNLOCK_ICON_URL);
             unlockIconRun = new ImageRun({ 
                 data: new Uint8Array(unlockBuffer), 
                 transformation: { width: 15, height: 15 },
-                type: "png"
+                type: unlockType
             });
         } catch(e) { console.warn("Unlock icon fetch failed", e); }
 
@@ -477,12 +489,11 @@ const App: React.FC = () => {
             for (const fig of manuscriptData.figures) {
                 let figRun: any = new TextRun(`[Image: ${fig.caption}]`);
                 try {
-                     const buf = await getImageBuffer(fig.fileUrl);
-                     const isPng = fig.fileUrl.toLowerCase().includes("png") || fig.fileUrl.toLowerCase().includes("image/png");
+                     const { data: buf, type: figType } = await getImageData(fig.fileUrl);
                      figRun = new ImageRun({ 
                          data: new Uint8Array(buf), 
                          transformation: { width: 300, height: 300 },
-                         type: isPng ? "png" : "jpeg"
+                         type: figType
                      });
                 } catch(e) { console.error(e) }
                 bodyChildren.push( new Paragraph({ children: [figRun], alignment: AlignmentType.CENTER, spacing: { before: 100 } }), new Paragraph({ children: [ new TextRun({ text: `Figure ${fig.id}: `, bold: true, color: journalBlue, font: "Arial", size: 18 }), new TextRun({ text: fig.caption, font: "Arial", size: 18 }) ], alignment: AlignmentType.CENTER, spacing: { before: 50, after: 300 } }) );
