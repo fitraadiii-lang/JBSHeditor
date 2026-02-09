@@ -122,11 +122,26 @@
         border-bottom: none;
       }
 
+      /* --- BODY PARAGRAPH INDENTATION --- */
+      /* Apply 1cm indent to all paragraphs in the body content */
+      .manuscript-content p {
+          text-indent: 1cm;
+          margin-bottom: 0.5em; /* Maintain spacing */
+      }
+      
+      /* Reset indent for tables and figures inside body */
+      .manuscript-content table p, 
+      .manuscript-content .figure-container p,
+      .manuscript-content .figure-container {
+          text-indent: 0 !important;
+      }
+
       /* --- APA REFERENCE STYLE --- */
-      /* Hanging indent */
+      /* Hanging indent: Ensure positive padding so text doesn't overflow left */
       .apa-reference {
-        padding-left: 2em;
-        text-indent: -2em;
+        padding-left: 0.5in; /* Space for the hang */
+        text-indent: -0.5in; /* Pull first line back */
+        margin-left: 0.5em; /* Slight visual buffer from edge */
         margin-bottom: 0.5em;
         font-size: 9pt;
         line-height: 1.4;
