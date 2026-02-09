@@ -359,7 +359,7 @@ const App: React.FC = () => {
                         new ImageRun({
                             data: new Uint8Array(logoBuffer),
                             transformation: { width: 76, height: 76 },
-                            type: extension
+                          
                         })
                     ]
                 });
@@ -522,7 +522,7 @@ const App: React.FC = () => {
         const citationTable = new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, borders: { top: { style: BorderStyle.NONE }, bottom: { style: BorderStyle.NONE }, right: { style: BorderStyle.NONE }, left: { style: BorderStyle.SINGLE, size: 24, color: journalBlue }, insideVertical: { style: BorderStyle.NONE }, insideHorizontal: { style: BorderStyle.NONE } }, rows: [ new TableRow({ children: [ new TableCell({ shading: { fill: "F0F9FF", type: ShadingType.CLEAR }, children: [ new Paragraph({ children: [ new TextRun({ text: "Cite this article: ", bold: true, color: journalBlue, font: "Arial", size: 16 }), new TextRun({ text: `${citationAuthors} (${manuscriptData.year}). ${manuscriptData.title}. `, font: "Georgia", size: 16 }), new TextRun({ text: "Journal of Biomedical Sciences and Health", italics: true, font: "Georgia", size: 16 }), new TextRun({ text: `, ${manuscriptData.volume}(${manuscriptData.issue}), ${manuscriptData.pages}. https://doi.org/${manuscriptData.doi}`, font: "Georgia", size: 16 }) ], alignment: AlignmentType.JUSTIFIED }) ], margins: { left: 100, right: 100, top: 100, bottom: 100 } }) ] }) ] });
         frontMatterChildren.push(citationTable);
         frontMatterChildren.push(new Paragraph({ text: "", spacing: { after: 200 } }));
-        let unlockIconRun: any = new Paragraph(""); try { const { data: unlockBuffer, extension } = await getImageBuffer(UNLOCK_ICON_URL); unlockIconRun = new ImageRun({ data: new Uint8Array(unlockBuffer), transformation: { width: 15, height: 15 }, type: extension }); } catch(e) { console.warn("Unlock icon fetch failed", e); }
+        let unlockIconRun: any = new Paragraph(""); try { const { data: unlockBuffer, extension } = await getImageBuffer(UNLOCK_ICON_URL); unlockIconRun = new ImageRun({ data: new Uint8Array(unlockBuffer), transformation: { width: 15, height: 15 }, }); } catch(e) { console.warn("Unlock icon fetch failed", e); }
         const openAccessBoxTable = new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, borders: { top: { style: BorderStyle.SINGLE, color: "CCCCCC", size: 2 }, bottom: { style: BorderStyle.SINGLE, color: "CCCCCC", size: 2 }, left: { style: BorderStyle.SINGLE, color: "CCCCCC", size: 2 }, right: { style: BorderStyle.SINGLE, color: "CCCCCC", size: 2 }, insideVertical: { style: BorderStyle.NONE } }, rows: [ new TableRow({ children: [ new TableCell({ width: { size: 5, type: WidthType.PERCENTAGE }, children: [ new Paragraph({ children: [unlockIconRun], alignment: AlignmentType.CENTER }) ], verticalAlign: VerticalAlign.CENTER, shading: { fill: "F3F4F6", type: ShadingType.CLEAR } }), new TableCell({ width: { size: 95, type: WidthType.PERCENTAGE }, children: [ new Paragraph({ children: [ new TextRun({ text: "Open Access. ", bold: true, color: journalBlue, font: "Arial", size: 16 }), new TextRun({ text: "This article is an open access article distributed under the terms and conditions of the Creative Commons Attribution 4.0 International License (CC BY 4.0).", font: "Arial", size: 16 }) ], alignment: AlignmentType.JUSTIFIED }) ], margins: { top: 100, bottom: 100, left: 100, right: 100 }, verticalAlign: VerticalAlign.CENTER }) ] }) ] });
         frontMatterChildren.push(openAccessBoxTable);
         frontMatterChildren.push(new Paragraph({ text: "", spacing: { after: 400 } }));
@@ -557,7 +557,7 @@ const App: React.FC = () => {
                                   figRun = new ImageRun({ 
                                       data: new Uint8Array(buf), 
                                       transformation: { width: 300, height: 300 },
-                                      type: extension
+                                      
                                   });
                              } catch(e) { console.error(e) }
                              
@@ -580,7 +580,7 @@ const App: React.FC = () => {
                      figRun = new ImageRun({ 
                          data: new Uint8Array(buf), 
                          transformation: { width: 300, height: 300 },
-                         type: extension
+                     
                      });
                 } catch(e) { console.error(e) }
                 bodyChildren.push( new Paragraph({ children: [figRun], alignment: AlignmentType.CENTER, spacing: { before: 100 } }), new Paragraph({ children: [ new TextRun({ text: `Figure ${fig.id}: `, bold: true, color: journalBlue, font: "Arial", size: 18 }), new TextRun({ text: fig.caption, font: "Arial", size: 18 }) ], alignment: AlignmentType.CENTER, spacing: { before: 50, after: 300 } }) );
