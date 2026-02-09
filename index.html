@@ -123,10 +123,19 @@
       }
 
       /* --- BODY PARAGRAPH INDENTATION --- */
-      /* Apply 1cm indent to all paragraphs in the body content */
+      /* Apply 1cm indent to paragraphs in the body content */
       .manuscript-content p {
           text-indent: 1cm;
           margin-bottom: 0.5em; /* Maintain spacing */
+      }
+
+      /* EXCEPTION: Headings (h1-h6) or Bold paragraphs acting as headings should NOT indent */
+      .manuscript-content h1, 
+      .manuscript-content h2, 
+      .manuscript-content h3, 
+      .manuscript-content h4,
+      .manuscript-content strong {
+          text-indent: 0 !important;
       }
       
       /* Reset indent for tables and figures inside body */
@@ -138,10 +147,11 @@
 
       /* --- APA REFERENCE STYLE --- */
       /* Hanging indent: Ensure positive padding so text doesn't overflow left */
+      /* 1cm Indent for references */
       .apa-reference {
-        padding-left: 0.5in; /* Space for the hang */
-        text-indent: -0.5in; /* Pull first line back */
-        margin-left: 0.5em; /* Slight visual buffer from edge */
+        padding-left: 1cm; /* Space for the hang */
+        text-indent: -1cm; /* Pull first line back */
+        margin-left: 0; 
         margin-bottom: 0.5em;
         font-size: 9pt;
         line-height: 1.4;

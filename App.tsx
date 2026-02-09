@@ -1,9 +1,9 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ManuscriptData, AppState, ManuscriptFigure } from './types';
 import { parseManuscript } from './services/geminiService';
 import { LayoutPreview } from './components/LayoutPreview';
-import { Upload, FileText, Printer, ChevronLeft, RefreshCw, AlertCircle, ArrowRight, Image as ImageIcon, Plus, Trash2, FileDown, Edit, Check, Save, LogIn, User, LogOut, Home, FileSearch, Info, AlertTriangle, CheckCircle } from 'lucide-react';
+import { Upload, FileText, Printer, ChevronLeft, RefreshCw, AlertCircle, ArrowRight, Image as ImageIcon, Plus, Trash2, FileDown, Edit, Check, Save, LogIn, User, LogOut, Home, FileSearch, Info, AlertTriangle, CheckCircle, SearchX } from 'lucide-react';
 import mammoth from 'mammoth';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, ImageRun, SectionType, BorderStyle, Table, TableRow, TableCell, WidthType, ShadingType, Header, Footer, PageNumber, VerticalAlign } from "docx";
 import FileSaver from "file-saver";
@@ -32,6 +32,8 @@ interface ValidationStats {
     generatedWordCount: number;
     coveragePercent: number; // How many unique words from original exist in generated
     status: 'success' | 'warning' | 'danger';
+    missingSections: string[];
+    formattingIssues: string[]; // Writing errors/formatting issues
 }
 
 const App: React.FC = () => {
@@ -51,6 +53,15 @@ const App: React.FC = () => {
 
   // New State for Figure Upload inputs
   const [newFigCaption, setNewFigCaption] = useState("");
+
+  // --- UTILS ---
+  const toTitleCase = (str: string) => {
+    if (!str) return "";
+    return str.replace(
+      /\w\S*/g,
+      text => text.charAt(0).toUpperCase() + text.substring(1).toLowerCase()
+    );
+  };
 
   // --- AUTH HANDLERS ---
   const handleLogin = (e: React.FormEvent) => {
@@ -131,17 +142,44 @@ const App: React.FC = () => {
       const coverage = uniqueOriginalWords.size > 0 
         ? Math.round((foundCount / uniqueOriginalWords.size) * 100) 
         : 0;
+        
+      // 4. Missing Structure Check (Section B: Identifikasi bagian yang kurang)
+      const requiredSections = ['Introduction', 'Method', 'Result', 'Discussion', 'Conclusion'];
+      const currentHeadings = generated.sections.map(s => s.heading.toLowerCase());
+      const missingSections = requiredSections.filter(req => 
+          !currentHeadings.some(h => h.includes(req.toLowerCase()))
+      );
 
-      // 4. Determine Status
+      // 5. Formatting & Quality Checks (Section C: Kesalahan Penulisan)
+      const formattingIssues: string[] = [];
+      
+      // Check for Word artifacts (common in docx to text conversion)
+      if (generatedContent.includes("Error! Reference source not found")) {
+          formattingIssues.push("Found 'Error! Reference source not found' artifact.");
+      }
+      
+      // Check for leftover placeholders
+      if (/\[\s*(?:insert|figure|table).*\]/i.test(generatedContent)) {
+          formattingIssues.push("Potential placeholder text detected (e.g., [Insert Figure]).");
+      }
+
+      // Check for space before punctuation (e.g. "word .") - Common typing error
+      if (/[a-z]{2,}\s+[\.,;:]/.test(generatedContent)) {
+           formattingIssues.push("Incorrect spacing detected before punctuation (e.g., 'word .').");
+      }
+
+      // 6. Determine Status
       let status: 'success' | 'warning' | 'danger' = 'success';
-      if (coverage < 70 || genCount < origCount * 0.6) status = 'danger';
-      else if (coverage < 85 || genCount < origCount * 0.8) status = 'warning';
+      if (coverage < 70 || genCount < origCount * 0.6 || missingSections.length > 2) status = 'danger';
+      else if (coverage < 85 || genCount < origCount * 0.8 || missingSections.length > 0 || formattingIssues.length > 0) status = 'warning';
 
       setValidationStats({
           originalWordCount: origCount,
           generatedWordCount: genCount,
           coveragePercent: coverage,
-          status
+          status,
+          missingSections,
+          formattingIssues
       });
   };
 
@@ -252,6 +290,9 @@ const App: React.FC = () => {
          data.logoUrl = DEFAULT_LOGO_URL;
       }
       
+      // Force Title Case
+      data.title = toTitleCase(data.title);
+
       // MERGE FIGURES: Use extracted figures from Docx if available, otherwise empty
       if (initialFigures.length > 0) {
           data.figures = initialFigures;
@@ -302,15 +343,15 @@ const App: React.FC = () => {
       }
   };
 
-  const getImageBuffer = async (url: string): Promise<{ data: ArrayBuffer, extension: "png" | "jpeg" | "gif" | "bmp" }> => {
+  const getImageBuffer = async (url: string): Promise<{ data: ArrayBuffer, extension: "png" | "jpg" | "gif" | "bmp" }> => {
       try {
           const response = await fetch(url);
           const blob = await response.blob();
           const data = await blob.arrayBuffer();
           const mime = blob.type.toLowerCase();
-          let extension: "png" | "jpeg" | "gif" | "bmp" = "png";
+          let extension: "png" | "jpg" | "gif" | "bmp" = "png";
           
-          if (mime.includes("jpeg") || mime.includes("jpg")) extension = "jpeg";
+          if (mime.includes("jpeg") || mime.includes("jpg")) extension = "jpg";
           else if (mime.includes("gif")) extension = "gif";
           else if (mime.includes("bmp")) extension = "bmp";
           // We ignore SVG for now to prevent types error (requires fallback for docx)
@@ -358,8 +399,9 @@ const App: React.FC = () => {
                     children: [
                         new ImageRun({
                             data: new Uint8Array(logoBuffer),
-                            transformation: { width: 76, height: 76 }
-                              })
+                            transformation: { width: 76, height: 76 },
+                            type: logoExt
+                        })
                     ]
                 });
             } catch (e) {
@@ -448,10 +490,10 @@ const App: React.FC = () => {
             })
         );
 
-        // 4. Article Type & Title
+        // 4. Article Type & Title (Apply Title Case)
         frontMatterChildren.push(
             new Paragraph({ children: [new TextRun({ text: "Original Research Article", italics: true, font: "Georgia", size: 22 })], alignment: AlignmentType.CENTER, spacing: { after: 200 } }),
-            new Paragraph({ children: [new TextRun({ text: manuscriptData.title, bold: true, size: 28, font: "Georgia" })], alignment: AlignmentType.CENTER, spacing: { after: 300 } })
+            new Paragraph({ children: [new TextRun({ text: toTitleCase(manuscriptData.title), bold: true, size: 28, font: "Georgia" })], alignment: AlignmentType.CENTER, spacing: { after: 300 } })
         );
 
         // 6. Authors (Fixed Grouping)
@@ -505,7 +547,12 @@ const App: React.FC = () => {
                             children: [
                                 new Paragraph({ children: [new TextRun({ text: "ABSTRACT", bold: true, color: journalBlue, font: "Arial", size: 20 })], alignment: AlignmentType.CENTER, spacing: { before: 100, after: 200 } }),
                                 new Paragraph({ children: [new TextRun({ text: manuscriptData.abstract, font: "Georgia", size: 20 })], alignment: AlignmentType.JUSTIFIED, spacing: { after: 200 } }),
-                                new Paragraph({ children: [new TextRun({ text: "Keywords: ", bold: true, font: "Georgia", size: 20 }), new TextRun({ text: manuscriptData.keywords.join("; "), font: "Georgia", size: 20 })], spacing: { after: 100 } })
+                                // FIX: Justify Keywords
+                                new Paragraph({ 
+                                    children: [new TextRun({ text: "Keywords: ", bold: true, font: "Georgia", size: 20 }), new TextRun({ text: manuscriptData.keywords.join("; "), font: "Georgia", size: 20 })], 
+                                    spacing: { after: 100 },
+                                    alignment: AlignmentType.JUSTIFIED 
+                                })
                             ],
                             margins: { top: 200, bottom: 200, left: 200, right: 200 } 
                         })
@@ -522,13 +569,14 @@ const App: React.FC = () => {
         const citationTable = new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, borders: { top: { style: BorderStyle.NONE }, bottom: { style: BorderStyle.NONE }, right: { style: BorderStyle.NONE }, left: { style: BorderStyle.SINGLE, size: 24, color: journalBlue }, insideVertical: { style: BorderStyle.NONE }, insideHorizontal: { style: BorderStyle.NONE }, }, rows: [ new TableRow({ children: [ new TableCell({ shading: { fill: "F0F9FF", type: ShadingType.CLEAR }, children: [ new Paragraph({ children: [ new TextRun({ text: "Cite this article: ", bold: true, color: journalBlue, font: "Arial", size: 16 }), new TextRun({ text: `${citationAuthors} (${manuscriptData.year}). ${manuscriptData.title}. `, font: "Georgia", size: 16 }), new TextRun({ text: "Journal of Biomedical Sciences and Health", italics: true, font: "Georgia", size: 16 }), new TextRun({ text: `, ${manuscriptData.volume}(${manuscriptData.issue}), ${manuscriptData.pages}. https://doi.org/${manuscriptData.doi}`, font: "Georgia", size: 16 }) ], alignment: AlignmentType.JUSTIFIED }) ], margins: { left: 100, right: 100, top: 100, bottom: 100 } }) ] }) ] });
         frontMatterChildren.push(citationTable);
         frontMatterChildren.push(new Paragraph({ text: "", spacing: { after: 200 } }));
+        
         let unlockIconRun: any = new Paragraph(""); 
         try { 
             const { data: unlockBuffer, extension: unlockExt } = await getImageBuffer(UNLOCK_ICON_URL); 
             unlockIconRun = new ImageRun({ 
                 data: new Uint8Array(unlockBuffer), 
                 transformation: { width: 15, height: 15 },
-         
+                type: unlockExt
             }); 
         } catch(e) { console.warn("Unlock icon fetch failed", e); }
         
@@ -540,7 +588,13 @@ const App: React.FC = () => {
         const placedFigures = new Set<string>();
 
         for (const section of manuscriptData.sections) {
-            bodyChildren.push(new Paragraph({ children: [new TextRun({ text: section.heading, bold: true, color: "000000", font: "Arial", size: 22 })], heading: HeadingLevel.HEADING_1, spacing: { before: 200, after: 100 } }));
+            // Heading is ALWAYS left aligned, no indent
+            bodyChildren.push(new Paragraph({ 
+                children: [new TextRun({ text: section.heading, bold: true, color: "000000", font: "Arial", size: 22 })], 
+                heading: HeadingLevel.HEADING_1, 
+                spacing: { before: 200, after: 100 },
+                indent: { firstLine: 0 } // Explicitly 0 for headings
+            }));
             
             // Split content into paragraphs to inject figures between them
             const paragraphs = stripHtmlToText(section.content).split(/\n\n+/);
@@ -548,15 +602,21 @@ const App: React.FC = () => {
             for (const paraText of paragraphs) {
                 if (!paraText.trim()) continue;
 
+                // DETECT SUBHEADINGS within content
+                // Heuristic: Short length (< 80 chars) AND (Starts with Number OR All Caps)
+                const isHeading = paraText.length < 80 && (/^\d+\./.test(paraText.trim()) || /^[A-Z\s\W]+$/.test(paraText.trim()));
+                
                 // MAIN BODY PARAGRAPHS - Add First Line Indent (1cm ~ 567 twips)
+                // If it looks like a subheading, indent is 0
                 bodyChildren.push(new Paragraph({ 
-                    children: [new TextRun({ text: paraText, font: "Georgia", size: 21 })], 
+                    children: [new TextRun({ text: paraText, font: "Georgia", size: 21, bold: isHeading })], 
                     alignment: AlignmentType.JUSTIFIED, 
                     spacing: { after: 200 },
-                    indent: { firstLine: 567 } // 1cm Indent
+                    indent: { firstLine: isHeading ? 0 : 567 } // 1cm Indent for paragraphs, 0 for headings
                 }));
 
                 // Check for Figure matches (e.g., "Figure 1") in this paragraph
+                // Logic: Find the FIRST occurrence, if matched and not yet placed, insert it.
                 const regex = /(?:Figure|Fig\.?)\s*(\d+)/gi;
                 let match;
                 while ((match = regex.exec(paraText)) !== null) {
@@ -565,14 +625,17 @@ const App: React.FC = () => {
                         const fig = manuscriptData.figures.find(f => f.id === figId);
                         if (fig) {
                              placedFigures.add(figId);
+                             
                              let figRun: any = new TextRun(`[Image: ${fig.caption}]`);
                              try {
                                   const { data: buf, extension: figExt } = await getImageBuffer(fig.fileUrl);
                                   figRun = new ImageRun({ 
                                       data: new Uint8Array(buf), 
-                                      transformation: { width: 300, height: 300 }
-                                      });
-                             } catch(e) { console.error(e) }                      
+                                      transformation: { width: 300, height: 300 },
+                                      type: figExt
+                                  });
+                             } catch(e) { console.error(e) }
+                             
                              bodyChildren.push(new Paragraph({ children: [figRun], alignment: AlignmentType.CENTER, spacing: { before: 100 } }));
                              bodyChildren.push(new Paragraph({ children: [ new TextRun({ text: `Figure ${fig.id}: `, bold: true, color: journalBlue, font: "Arial", size: 18 }), new TextRun({ text: fig.caption, font: "Arial", size: 18 }) ], alignment: AlignmentType.CENTER, spacing: { before: 50, after: 300 } }));
                         }
@@ -592,7 +655,7 @@ const App: React.FC = () => {
                      figRun = new ImageRun({ 
                          data: new Uint8Array(buf), 
                          transformation: { width: 300, height: 300 },
-          
+                         type: figExt
                      });
                 } catch(e) { console.error(e) }
                 bodyChildren.push( new Paragraph({ children: [figRun], alignment: AlignmentType.CENTER, spacing: { before: 100 } }), new Paragraph({ children: [ new TextRun({ text: `Figure ${fig.id}: `, bold: true, color: journalBlue, font: "Arial", size: 18 }), new TextRun({ text: fig.caption, font: "Arial", size: 18 }) ], alignment: AlignmentType.CENTER, spacing: { before: 50, after: 300 } }) );
@@ -602,13 +665,13 @@ const App: React.FC = () => {
         // References
         bodyChildren.push( new Paragraph({ children: [new TextRun({ text: "REFERENCES", bold: true, font: "Arial", size: 22 })], heading: HeadingLevel.HEADING_1, spacing: { before: 400, after: 200 }, border: { top: { style: BorderStyle.SINGLE, size: 6 } } }) );
         manuscriptData.references.forEach((ref) => {
-             // Hanging indent for APA - FIXED for DOCX clipping
-             // Indent entire block left by 0.5in (720), then pull first line back by 0.5in (-720)
+             // Hanging indent for APA - 1cm (567 twips)
+             // Indent entire block left by 1cm, then pull first line back by 1cm
              bodyChildren.push( new Paragraph({ 
                  children: [new TextRun({ text: ref, font: "Georgia", size: 18 })], 
                  alignment: AlignmentType.JUSTIFIED, 
                  spacing: { after: 100 },
-                 indent: { left: 720, hanging: 720 } 
+                 indent: { left: 567, hanging: 567 } 
             }) );
         });
 
@@ -666,6 +729,90 @@ const App: React.FC = () => {
   const handleLogoUpload = (event: React.ChangeEvent<HTMLInputElement>) => { const file = event.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = (e) => { if (manuscriptData) { setManuscriptData({ ...manuscriptData, logoUrl: e.target?.result as string }); } }; reader.readAsDataURL(file); };
   const handleAddFigure = (event: React.ChangeEvent<HTMLInputElement>) => { const file = event.target.files?.[0]; if (!file || !manuscriptData) return; const reader = new FileReader(); reader.onload = (e) => { const newFigure: ManuscriptFigure = { id: (manuscriptData.figures.length + 1).toString(), fileUrl: e.target?.result as string, caption: newFigCaption || `Figure ${manuscriptData.figures.length + 1}` }; setManuscriptData({ ...manuscriptData, figures: [...manuscriptData.figures, newFigure] }); setNewFigCaption(""); }; reader.readAsDataURL(file); };
   const handleRemoveFigure = (id: string) => { if (!manuscriptData) return; setManuscriptData({ ...manuscriptData, figures: manuscriptData.figures.filter(f => f.id !== id) }); };
+
+  // --- REUSABLE QUALITY CONTROL SIDEBAR ---
+  const renderQualityControlSidebar = () => (
+    <div className={`p-4 rounded-xl shadow-lg border-2 ${
+        validationStats?.status === 'success' ? 'bg-green-50 border-green-200' :
+        validationStats?.status === 'warning' ? 'bg-yellow-50 border-yellow-200' : 'bg-red-50 border-red-200'
+    }`}>
+        <div className="flex items-center gap-2 mb-3 border-b border-black/10 pb-2">
+            <FileSearch size={20} className={validationStats?.status === 'success' ? 'text-green-600' : validationStats?.status === 'warning' ? 'text-yellow-600' : 'text-red-600'} />
+            <h3 className="font-bold text-sm text-slate-800">Quality Control</h3>
+        </div>
+        
+        {validationStats ? (
+            <div className="space-y-4">
+                {/* Word Count Comparison */}
+                <div>
+                    <p className="text-xs text-slate-500 uppercase font-bold">Transfer Integrity</p>
+                    <div className="flex items-end gap-2">
+                        <span className={`text-2xl font-bold ${
+                            validationStats.status === 'success' ? 'text-green-700' : 
+                            validationStats.status === 'warning' ? 'text-yellow-700' : 'text-red-700'
+                        }`}>{validationStats.coveragePercent}%</span>
+                        <span className="text-xs text-slate-500 mb-1">match rate</span>
+                    </div>
+                    <div className="w-full bg-white h-2 rounded-full mt-1 border border-slate-100 overflow-hidden">
+                        <div className={`h-full rounded-full ${
+                            validationStats.status === 'success' ? 'bg-green-500' : 
+                            validationStats.status === 'warning' ? 'bg-yellow-500' : 'bg-red-500'
+                        }`} style={{width: `${validationStats.coveragePercent}%`}}></div>
+                    </div>
+                </div>
+
+                {/* Structure Check */}
+                <div>
+                    <p className="text-xs text-slate-500 uppercase font-bold mb-1">Missing Parts (IMRAD)</p>
+                    {validationStats.missingSections.length === 0 ? (
+                        <div className="flex items-center gap-1.5 text-green-700 text-xs font-bold bg-green-100 p-1.5 rounded">
+                            <CheckCircle size={12} /> All sections present
+                        </div>
+                    ) : (
+                        <div className="space-y-1">
+                            {validationStats.missingSections.map(miss => (
+                                <div key={miss} className="flex items-center gap-1.5 text-red-700 text-xs bg-red-100 p-1.5 rounded">
+                                    <AlertTriangle size={12} /> Missing: {miss}
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+
+                {/* Formatting & Writing Errors */}
+                <div>
+                    <p className="text-xs text-slate-500 uppercase font-bold mb-1">Writing & Formatting</p>
+                    {validationStats.formattingIssues.length === 0 ? (
+                        <div className="flex items-center gap-1.5 text-green-700 text-xs font-bold bg-green-100 p-1.5 rounded">
+                            <CheckCircle size={12} /> No major issues
+                        </div>
+                    ) : (
+                        <div className="space-y-1">
+                            {validationStats.formattingIssues.map((issue, idx) => (
+                                <div key={idx} className="flex items-start gap-1.5 text-yellow-800 text-[10px] bg-yellow-100 p-1.5 rounded leading-tight">
+                                    <SearchX size={12} className="shrink-0 mt-0.5" /> <span>{issue}</span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-xs pt-2 border-t border-black/5">
+                    <div className="bg-white p-2 rounded border border-slate-100">
+                        <p className="text-slate-400">Original</p>
+                        <p className="font-bold text-slate-700">{validationStats.originalWordCount} words</p>
+                    </div>
+                    <div className="bg-white p-2 rounded border border-slate-100">
+                        <p className="text-slate-400">Generated</p>
+                        <p className="font-bold text-slate-700">{validationStats.generatedWordCount} words</p>
+                    </div>
+                </div>
+            </div>
+        ) : (
+            <p className="text-xs text-slate-400">Analyzing content...</p>
+        )}
+    </div>
+  );
 
   // --- RENDER LOGIN SCREEN ---
   if (appState === AppState.LOGIN) {
@@ -818,63 +965,9 @@ const App: React.FC = () => {
         {appState === AppState.METADATA_REVIEW && manuscriptData && (
              <div className="max-w-6xl mx-auto animate-in fade-in slide-in-from-bottom-4 no-print flex gap-6">
                 
-                {/* VALIDATION SIDEBAR (LEFT) */}
+                {/* VALIDATION SIDEBAR (LEFT) - ENHANCED FOR QUALITY CONTROL */}
                 <div className="w-64 shrink-0 space-y-6 hidden lg:block">
-                    <div className={`p-4 rounded-xl shadow-lg border-2 ${
-                        validationStats?.status === 'success' ? 'bg-green-50 border-green-200' :
-                        validationStats?.status === 'warning' ? 'bg-yellow-50 border-yellow-200' : 'bg-red-50 border-red-200'
-                    }`}>
-                        <div className="flex items-center gap-2 mb-3 border-b border-black/10 pb-2">
-                            <FileSearch size={20} className={validationStats?.status === 'success' ? 'text-green-600' : validationStats?.status === 'warning' ? 'text-yellow-600' : 'text-red-600'} />
-                            <h3 className="font-bold text-sm text-slate-800">Quality Check</h3>
-                        </div>
-                        
-                        {validationStats ? (
-                            <div className="space-y-4">
-                                <div>
-                                    <p className="text-xs text-slate-500 uppercase font-bold">Content Match</p>
-                                    <div className="flex items-end gap-2">
-                                        <span className={`text-2xl font-bold ${
-                                            validationStats.status === 'success' ? 'text-green-700' : 
-                                            validationStats.status === 'warning' ? 'text-yellow-700' : 'text-red-700'
-                                        }`}>{validationStats.coveragePercent}%</span>
-                                        <span className="text-xs text-slate-500 mb-1">of significant words found</span>
-                                    </div>
-                                    <div className="w-full bg-white h-2 rounded-full mt-1 border border-slate-100 overflow-hidden">
-                                        <div className={`h-full rounded-full ${
-                                            validationStats.status === 'success' ? 'bg-green-500' : 
-                                            validationStats.status === 'warning' ? 'bg-yellow-500' : 'bg-red-500'
-                                        }`} style={{width: `${validationStats.coveragePercent}%`}}></div>
-                                    </div>
-                                </div>
-
-                                <div className="grid grid-cols-2 gap-2 text-xs">
-                                    <div className="bg-white p-2 rounded border border-slate-100">
-                                        <p className="text-slate-400">Original</p>
-                                        <p className="font-bold text-slate-700">{validationStats.originalWordCount} words</p>
-                                    </div>
-                                    <div className="bg-white p-2 rounded border border-slate-100">
-                                        <p className="text-slate-400">Generated</p>
-                                        <p className="font-bold text-slate-700">{validationStats.generatedWordCount} words</p>
-                                    </div>
-                                </div>
-
-                                <div className={`text-xs p-2 rounded border flex gap-2 items-start ${
-                                    validationStats.status === 'success' ? 'bg-green-100 text-green-800 border-green-200' : 
-                                    validationStats.status === 'warning' ? 'bg-yellow-100 text-yellow-800 border-yellow-200' : 'bg-red-100 text-red-800 border-red-200'
-                                }`}>
-                                    {validationStats.status === 'success' ? <CheckCircle size={14} className="mt-0.5 shrink-0"/> : <AlertTriangle size={14} className="mt-0.5 shrink-0"/>}
-                                    <p>
-                                        {validationStats.status === 'success' ? "Excellent integrity. Most content preserved." :
-                                         validationStats.status === 'warning' ? "Good match, but check for missing paragraphs." :
-                                         "Significant content loss detected. Please review manually."}
-                                    </p>
-                                </div>
-                            </div>
-                        ) : (
-                            <p className="text-xs text-slate-400">Analyzing content...</p>
-                        )}
-                    </div>
+                    {renderQualityControlSidebar()}
                 </div>
 
                 {/* MAIN CONTENT FORM */}
@@ -925,17 +1018,25 @@ const App: React.FC = () => {
         )}
 
         {appState === AppState.PREVIEW && manuscriptData && (
-          <div className="flex justify-center">
-            <div className="w-full max-w-none flex justify-center" id="printable-content">
-                <LayoutPreview 
-                    data={manuscriptData} 
-                    isEditable={isEditingPreview}
-                    onUpdateField={handleUpdateField}
-                    onUpdateSection={handleUpdateSection}
-                    onUpdateFigureOrder={handleUpdateFigureOrder}
-                    onRemoveFigure={handleRemoveFigure}
-                />
-            </div>
+          <div className="max-w-[1600px] mx-auto flex items-start gap-8 justify-center p-4">
+             {/* QC Sidebar - Reused logic, ensure "no-print" class */}
+             <div className="w-72 shrink-0 space-y-6 hidden xl:block no-print sticky top-24">
+                 {renderQualityControlSidebar()}
+             </div>
+
+             {/* Preview Content */}
+             <div className="flex-1 flex justify-center min-w-0" id="printable-content">
+                <div className="w-full flex justify-center">
+                    <LayoutPreview 
+                        data={manuscriptData} 
+                        isEditable={isEditingPreview}
+                        onUpdateField={handleUpdateField}
+                        onUpdateSection={handleUpdateSection}
+                        onUpdateFigureOrder={handleUpdateFigureOrder}
+                        onRemoveFigure={handleRemoveFigure}
+                    />
+                </div>
+             </div>
           </div>
         )}
       </main>

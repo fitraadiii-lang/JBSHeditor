@@ -36,31 +36,34 @@ export const LayoutPreview: React.FC<LayoutPreviewProps> = ({
   // --- ABSTRACT FORMATTING ---
   const formatAbstract = (text: string) => {
       if (!text) return "";
-      return text.replace(/(^|\s|\.|;)(Purpose|Objectives?|Methods?|Results?|Conclusions?)([:.]?)/gim, '$1<span class="font-bold">$2$3</span>');
+      // Bold specific keywords: Background, Methods, Results, Conclusion, Purpose, Objective
+      return text.replace(/(^|\s|\.|;)(Background|Methods?|Results?|Conclusions?|Purpose|Objectives?)([:.]?)/gim, '$1<span class="font-bold">$2$3</span>');
   };
 
   // --- FIGURE INJECTION LOGIC ---
-  // We track which figures are placed inline to avoid duplicating them at the bottom
   const placedFigureIds = new Set<string>();
 
   const injectFigures = (content: string, figures: ManuscriptFigure[]) => {
       if (!figures || figures.length === 0) return content;
       
-      // Split content by paragraphs to insert figures *between* paragraphs
-      // We look for </p> or <br><br> or just newlines if it's plain text, but standard is HTML
-      // Fallback: if no <p> tags found, treat as one block
       const hasPTags = content.includes('</p>');
       
       if (!hasPTags) {
-          // Try to split by double newlines or breaks if plain text
-          // This ensures figures work even if AI returned Markdown-like text
           const parts = content.split(/\n\n+/);
           if (parts.length <= 1) return content;
           
           let newContent = "";
           parts.forEach((part) => {
               if (!part.trim()) return;
-              newContent += part + "\n\n";
+              // Detect if this part is a subheading (simple heuristic: short and matches pattern)
+              // We wrap likely subheadings in <h3> to ensure CSS indent:0 applies
+              const isHeading = part.length < 80 && /^\d+\.|^[A-Z\s]+$/.test(part.trim());
+              
+              if (isHeading) {
+                  newContent += `<h3>${part}</h3>`;
+              } else {
+                  newContent += `<p>${part}</p>`;
+              }
               
               const regex = /(?:Figure|Fig\.?)\s*(\d+)/gi;
               let match;
@@ -88,18 +91,16 @@ export const LayoutPreview: React.FC<LayoutPreviewProps> = ({
           return newContent;
       }
 
+      // Logic for HTML content (already has tags)
       const parts = content.split(/<\/p>/i);
       let newContent = "";
 
       parts.forEach((part, index) => {
           if (part.trim() === "") return;
 
-          // Re-add the closing tag stripped by split
           const paraContent = part + "</p>";
           newContent += paraContent;
 
-          // Check for Figure mentions in this paragraph
-          // Regex looks for "Figure 1", "Fig. 1", case insensitive
           const regex = /(?:Figure|Fig\.?)\s*(\d+)/gi;
           let match;
           while ((match = regex.exec(part)) !== null) {
@@ -108,8 +109,6 @@ export const LayoutPreview: React.FC<LayoutPreviewProps> = ({
                   const fig = figures.find(f => f.id === figId);
                   if (fig) {
                       placedFigureIds.add(figId);
-                      // Inject Figure HTML
-                      // Use inline styles or Tailwind classes matching the main app style
                       newContent += `
                         <div class="figure-container my-6 text-center page-break-inside-avoid">
                            <div class="bg-slate-50 inline-block p-2 border border-slate-100 rounded">
@@ -129,13 +128,11 @@ export const LayoutPreview: React.FC<LayoutPreviewProps> = ({
       return newContent;
   };
 
-  // Pre-process sections to inject figures
   const processedSections = data.sections.map(section => ({
       ...section,
       content: injectFigures(section.content, data.figures)
   }));
 
-  // Identify remaining figures that were NOT mentioned in text
   const remainingFigures = data.figures.filter(f => !placedFigureIds.has(f.id));
 
   return (
