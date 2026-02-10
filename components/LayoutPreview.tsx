@@ -40,70 +40,68 @@ export const LayoutPreview: React.FC<LayoutPreviewProps> = ({
       return text.replace(/(^|\s|\.|;)(Background|Methods?|Results?|Conclusions?|Purpose|Objectives?)([:.]?)/gim, '$1<span class="font-bold">$2$3</span>');
   };
 
-  // --- FIGURE INJECTION LOGIC ---
+  // --- FIGURE & EQUATION INJECTION LOGIC ---
   const placedFigureIds = new Set<string>();
 
+  // Heuristic for Equation Detection
+  const isEquation = (line: string): boolean => {
+      const t = line.replace(/<[^>]*>/g, '').trim();
+      if (t.length > 150) return false;
+      if (t.length < 2) return false;
+      // Must contain math symbols
+      const hasMath = /[=≈≠≤≥±×÷]/.test(t);
+      // Shouldn't contain figure labels
+      const isFigure = /^(Figure|Table)/i.test(t);
+      // Shouldn't end with period (sentences usually do)
+      return hasMath && !isFigure && !t.endsWith('.');
+  };
+
   const injectFigures = (content: string, figures: ManuscriptFigure[]) => {
-      if (!figures || figures.length === 0) return content;
+      if (!figures) figures = [];
       
       const hasPTags = content.includes('</p>');
       
+      let parts: string[] = [];
       if (!hasPTags) {
-          const parts = content.split(/\n\n+/);
-          if (parts.length <= 1) return content;
-          
-          let newContent = "";
-          parts.forEach((part) => {
-              if (!part.trim()) return;
-              // Detect if this part is a subheading (simple heuristic: short and matches pattern)
-              // We wrap likely subheadings in <h3> to ensure CSS indent:0 applies
-              const isHeading = part.length < 80 && /^\d+\.|^[A-Z\s]+$/.test(part.trim());
-              
-              if (isHeading) {
-                  newContent += `<h3>${part}</h3>`;
-              } else {
-                  newContent += `<p>${part}</p>`;
-              }
-              
-              const regex = /(?:Figure|Fig\.?)\s*(\d+)/gi;
-              let match;
-              while ((match = regex.exec(part)) !== null) {
-                  const figId = match[1];
-                  if (!placedFigureIds.has(figId)) {
-                      const fig = figures.find(f => f.id === figId);
-                      if (fig) {
-                          placedFigureIds.add(figId);
-                          newContent += `
-                            <div class="figure-container my-6 text-center page-break-inside-avoid">
-                               <div class="bg-slate-50 inline-block p-2 border border-slate-100 rounded">
-                                  <img src="${fig.fileUrl}" alt="${fig.caption}" class="max-h-[400px] max-w-full w-auto mx-auto object-contain mb-2" />
-                               </div>
-                               <div class="mt-2 px-8">
-                                  <span class="text-[9pt] font-bold font-sans-journal text-[#005580]">Figure ${fig.id}: </span>
-                                  <span class="text-[9pt] text-slate-600 font-sans-journal leading-tight">${fig.caption}</span>
-                               </div>
-                            </div>
-                          `;
-                      }
-                  }
-              }
-          });
-          return newContent;
+          parts = content.split(/\n\n+/).filter(p => p.trim());
+      } else {
+          parts = content.split(/<\/p>/i).filter(p => p.trim()).map(p => p + "</p>");
       }
 
-      // Logic for HTML content (already has tags)
-      const parts = content.split(/<\/p>/i);
       let newContent = "";
+      
+      parts.forEach((part) => {
+          let cleanPartText = part.replace(/<[^>]+>/g, '').trim();
+          if (!cleanPartText) return;
 
-      parts.forEach((part, index) => {
-          if (part.trim() === "") return;
+          // Detect Heading (Short, Numbered or All Caps)
+          const isHeading = cleanPartText.length < 80 && (/^\d+\.|^[A-Z\s]+$/.test(cleanPartText));
+          
+          // Detect Equation (Scopus Style)
+          const isEq = isEquation(cleanPartText);
 
-          const paraContent = part + "</p>";
-          newContent += paraContent;
+          // Build HTML for text part
+          if (hasPTags) {
+               // Existing HTML tag preserved, but inject classes for math
+               if (isEq) {
+                   newContent += part.replace('<p>', '<p class="text-center italic font-serif my-4">');
+               } else {
+                   newContent += part;
+               }
+          } else {
+              if (isHeading) {
+                  newContent += `<h3>${cleanPartText}</h3>`;
+              } else if (isEq) {
+                  newContent += `<div class="text-center italic font-serif my-4">${cleanPartText}</div>`;
+              } else {
+                  newContent += `<p>${cleanPartText}</p>`;
+              }
+          }
 
+          // Check for Figures
           const regex = /(?:Figure|Fig\.?)\s*(\d+)/gi;
           let match;
-          while ((match = regex.exec(part)) !== null) {
+          while ((match = regex.exec(cleanPartText)) !== null) {
               const figId = match[1];
               if (!placedFigureIds.has(figId)) {
                   const fig = figures.find(f => f.id === figId);

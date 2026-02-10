@@ -379,6 +379,45 @@ const App: React.FC = () => {
     return text.trim();
   };
 
+  // Helper function to bold abstract keywords in DOCX
+  const parseAbstractToTextRuns = (abstractText: string): TextRun[] => {
+      if (!abstractText) return [];
+      
+      // Keywords to look for
+      const keywords = ["Background", "Methods", "Method", "Results", "Result", "Conclusions", "Conclusion", "Purpose", "Objectives", "Objective"];
+      // Regex matches keyword followed by optional colon/period. Capture the keyword+sep in group 1.
+      const regex = new RegExp(`(${keywords.join("|")})[:.]?`, "gi");
+      
+      const parts = abstractText.split(regex);
+      const textRuns: TextRun[] = [];
+
+      parts.forEach((part) => {
+          if (!part) return;
+          // Check if this part matches one of our keywords (case insensitive check)
+          const isKeyword = keywords.some(k => part.toLowerCase().includes(k.toLowerCase()));
+          
+          textRuns.push(new TextRun({
+              text: part,
+              font: "Georgia",
+              size: 20, // 10pt
+              bold: isKeyword // Bold if it matches
+          }));
+      });
+
+      return textRuns;
+  };
+
+  // Helper to identify potential formulas
+  const isEquation = (text: string): boolean => {
+      const t = text.trim();
+      if (t.length > 150) return false; // Too long
+      if (t.length < 2) return false;
+      // Heuristic: Contains equals sign or approximations, and doesn't look like a normal sentence start
+      const hasMathChars = /[=≈≠≤≥±×÷]/.test(t);
+      const isFigureOrTable = /^(Figure|Table)/i.test(t);
+      return hasMathChars && !isFigureOrTable && !t.endsWith('.'); 
+  };
+
   const handleDownloadDocx = async () => {
     if (!manuscriptData) return;
     setIsDownloading(true);
@@ -537,7 +576,12 @@ const App: React.FC = () => {
                             shading: { fill: "F9FAFB", type: ShadingType.CLEAR },
                             children: [
                                 new Paragraph({ children: [new TextRun({ text: "ABSTRACT", bold: true, color: journalBlue, font: "Arial", size: 20 })], alignment: AlignmentType.CENTER, spacing: { before: 100, after: 200 } }),
-                                new Paragraph({ children: [new TextRun({ text: manuscriptData.abstract, font: "Georgia", size: 20 })], alignment: AlignmentType.JUSTIFIED, spacing: { after: 200 } }),
+                                // UPDATED: Use parseAbstractToTextRuns instead of raw string to support bold keywords
+                                new Paragraph({ 
+                                    children: parseAbstractToTextRuns(manuscriptData.abstract), 
+                                    alignment: AlignmentType.JUSTIFIED, 
+                                    spacing: { after: 200 } 
+                                }),
                                 new Paragraph({ 
                                     children: [new TextRun({ text: "Keywords: ", bold: true, font: "Georgia", size: 20 }), new TextRun({ text: manuscriptData.keywords.join("; "), font: "Georgia", size: 20 })], 
                                     spacing: { after: 100 },
@@ -587,13 +631,22 @@ const App: React.FC = () => {
             for (const paraText of paragraphs) {
                 if (!paraText.trim()) continue;
 
+                // Identify if it's a heading
                 const isHeading = paraText.length < 80 && (/^\d+\./.test(paraText.trim()) || /^[A-Z\s\W]+$/.test(paraText.trim()));
+                // Identify if it's a Formula/Equation
+                const isFormula = isEquation(paraText);
                 
                 bodyChildren.push(new Paragraph({ 
-                    children: [new TextRun({ text: paraText, font: "Georgia", size: 21, bold: isHeading })], 
-                    alignment: AlignmentType.JUSTIFIED, 
+                    children: [new TextRun({ 
+                        text: paraText, 
+                        font: isFormula ? "Cambria Math" : "Georgia", 
+                        size: 21, 
+                        bold: isHeading,
+                        italics: isFormula // Scopus style: Italics for math
+                    })], 
+                    alignment: isFormula ? AlignmentType.CENTER : AlignmentType.JUSTIFIED, // Center formulas
                     spacing: { after: 200 },
-                    indent: { firstLine: isHeading ? 0 : 567 } 
+                    indent: { firstLine: (isHeading || isFormula) ? 0 : 567 } // No indent for formulas/headings
                 }));
 
                 const regex = /(?:Figure|Fig\.?)\s*(\d+)/gi;

@@ -89,7 +89,8 @@ export const parseManuscript = async (text: string): Promise<ManuscriptData> => 
     2. Preserve the core content and paragraphs. 
     3. Fix obvious formatting issues (like line breaks in the middle of sentences).
     4. Remove page numbers or running headers.
-    5. Ensure the Output is Valid JSON.
+    5. FORMULAS: If you encounter mathematical formulas or equations, keep them on their own separate line to ensure clear formatting.
+    6. Ensure the Output is Valid JSON.
 
     Input Text:
     ${text}
