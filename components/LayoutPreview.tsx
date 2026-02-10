@@ -74,8 +74,11 @@ export const LayoutPreview: React.FC<LayoutPreviewProps> = ({
           let cleanPartText = part.replace(/<[^>]+>/g, '').trim();
           if (!cleanPartText) return;
 
-          // Detect Heading (Short, Numbered or All Caps)
-          const isHeading = cleanPartText.length < 80 && (/^\d+\.|^[A-Z\s]+$/.test(cleanPartText));
+          // Detect MAIN Heading (1. Introduction, or CAPS)
+          const isMainHeading = cleanPartText.length < 100 && (/^\d+\.\s+[A-Z]/.test(cleanPartText) || /^[A-Z\s\W]+$/.test(cleanPartText));
+          
+          // Detect SUB Heading (2.1. Analysis, 3.2.1. Method)
+          const isSubHeading = cleanPartText.length < 100 && /^\d+(\.\d+)+/.test(cleanPartText);
           
           // Detect Equation (Scopus Style)
           const isEq = isEquation(cleanPartText);
@@ -89,12 +92,15 @@ export const LayoutPreview: React.FC<LayoutPreviewProps> = ({
                    newContent += part;
                }
           } else {
-              if (isHeading) {
-                  newContent += `<h3>${cleanPartText}</h3>`;
+              if (isMainHeading) {
+                  newContent += `<h3 class="font-bold uppercase mt-4 mb-2 text-indent-0">${cleanPartText}</h3>`;
+              } else if (isSubHeading) {
+                  newContent += `<h4 class="font-bold mt-3 mb-1 text-indent-0">${cleanPartText}</h4>`;
               } else if (isEq) {
                   newContent += `<div class="text-center italic font-serif my-4">${cleanPartText}</div>`;
               } else {
-                  newContent += `<p>${cleanPartText}</p>`;
+                  // Standard paragraph - indent 1cm
+                  newContent += `<p class="indent-1cm">${cleanPartText}</p>`;
               }
           }
 

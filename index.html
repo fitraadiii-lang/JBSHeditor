@@ -123,10 +123,17 @@
       }
 
       /* --- BODY PARAGRAPH INDENTATION --- */
-      /* Apply 1cm indent to paragraphs in the body content */
-      .manuscript-content p {
+      /* 
+         Standard Indentation logic via class. 
+         Note: We removed the global p selector to handle sub-headings better.
+      */
+      .manuscript-content .indent-1cm {
           text-indent: 1cm;
           margin-bottom: 0.5em; /* Maintain spacing */
+      }
+      
+      .manuscript-content .text-indent-0 {
+          text-indent: 0 !important;
       }
 
       /* EXCEPTION: Headings (h1-h6) or Bold paragraphs acting as headings should NOT indent */

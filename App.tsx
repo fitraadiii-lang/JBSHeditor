@@ -631,22 +631,33 @@ const App: React.FC = () => {
             for (const paraText of paragraphs) {
                 if (!paraText.trim()) continue;
 
-                // Identify if it's a heading
-                const isHeading = paraText.length < 80 && (/^\d+\./.test(paraText.trim()) || /^[A-Z\s\W]+$/.test(paraText.trim()));
+                // Identify if it's a MAIN heading (1. Introduction, or CAPS)
+                const isMainHeading = paraText.length < 100 && (/^\d+\.\s+[A-Z]/.test(paraText.trim()) || /^[A-Z\s\W]+$/.test(paraText.trim()));
+                
+                // Identify if it's a SUB heading (2.1. Analysis, 3.2.1. Method)
+                const isSubHeading = paraText.length < 100 && /^\d+(\.\d+)+/.test(paraText.trim());
+
+                const isHeading = isMainHeading || isSubHeading;
+
                 // Identify if it's a Formula/Equation
                 const isFormula = isEquation(paraText);
                 
+                // Determine Indentation
+                // Headings, Formulas, and Figures = 0 indent
+                // Regular Text = 1cm (approx 567 twips) indent
+                const indentValue = (isHeading || isFormula) ? 0 : 567;
+
                 bodyChildren.push(new Paragraph({ 
                     children: [new TextRun({ 
                         text: paraText, 
                         font: isFormula ? "Cambria Math" : "Georgia", 
                         size: 21, 
-                        bold: isHeading,
+                        bold: isHeading, // Bold for both main and sub headings
                         italics: isFormula // Scopus style: Italics for math
                     })], 
-                    alignment: isFormula ? AlignmentType.CENTER : AlignmentType.JUSTIFIED, // Center formulas
+                    alignment: isFormula ? AlignmentType.CENTER : AlignmentType.JUSTIFIED, 
                     spacing: { after: 200 },
-                    indent: { firstLine: (isHeading || isFormula) ? 0 : 567 } // No indent for formulas/headings
+                    indent: { firstLine: indentValue } 
                 }));
 
                 const regex = /(?:Figure|Fig\.?)\s*(\d+)/gi;
