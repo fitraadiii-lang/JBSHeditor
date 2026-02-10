@@ -1,7 +1,7 @@
 import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { ManuscriptData } from "../types";
 
-// Define the strict schema for the manuscript output
+// Define the schema for the manuscript output
 const authorSchema: Schema = {
   type: Type.OBJECT,
   properties: {
@@ -16,7 +16,7 @@ const sectionSchema: Schema = {
   type: Type.OBJECT,
   properties: {
     heading: { type: Type.STRING, description: "The section title (e.g., Introduction, Methods)" },
-    content: { type: Type.STRING, description: "The FULL body text of the section. Keep paragraphs intact." },
+    content: { type: Type.STRING, description: "The body text of the section." },
   },
   required: ["heading", "content"],
 };
@@ -36,31 +36,28 @@ const manuscriptSchema: Schema = {
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
-// --- NEW FUNCTION: MANUAL MODE (NO AI) ---
+// --- MANUAL MODE (Helper) ---
 export const createManualManuscript = (text: string): ManuscriptData => {
-  // Simple heuristic: First non-empty line is title, rest is content.
-  const cleanText = text.replace(/<[^>]*>/g, '\n').trim(); // Strip HTML for manual mode safety
+  const cleanText = text.replace(/<[^>]*>/g, '\n').trim(); 
   const lines = cleanText.split('\n').filter(line => line.trim().length > 0);
   
   const title = lines.length > 0 ? lines[0] : "Untitled Manuscript";
-  // Join the rest of the text. Split by double newlines to make paragraphs.
   const bodyContent = lines.slice(1).join('\n\n') || "Paste your manuscript content here...";
 
   return {
     title: title,
     authors: [
-      { name: "Author Name 1", affiliation: "Affiliation 1", email: "author@example.com" },
-      { name: "Author Name 2", affiliation: "Affiliation 1" }
+      { name: "Author Name", affiliation: "Affiliation", email: "email@example.com" }
     ],
-    abstract: "Paste your abstract here...",
-    keywords: ["Keyword 1", "Keyword 2"],
+    abstract: "Abstract content...",
+    keywords: ["Keyword1", "Keyword2"],
     sections: [
       {
-        heading: "Full Manuscript Content (Please Organize)",
+        heading: "Main Content",
         content: bodyContent
       }
     ],
-    references: ["Reference 1", "Reference 2"],
+    references: ["Reference 1"],
     doi: "10.xxxxx/jbsh.vX.iX.xxxx",
     volume: "3",
     issue: "1",
@@ -77,21 +74,24 @@ export const createManualManuscript = (text: string): ManuscriptData => {
 export const parseManuscript = async (text: string): Promise<ManuscriptData> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  // STRATEGY: 
-  // 1. Try "gemini-3-pro-preview" first (High Intelligence, Good for strict formatting).
-  // 2. If it fails (503 Busy / Timeout), fallback to "gemini-3-flash-preview" (Faster, Higher Availability).
-  const modelsToTry = ["gemini-3-pro-preview", "gemini-3-flash-preview"];
+  // REVERT: Use Flash first (faster, more stable). Fallback to Pro only if needed.
+  // This restores the behavior before the "Strict" update that caused timeouts.
+  const modelsToTry = ["gemini-3-flash-preview", "gemini-3-pro-preview"];
 
+  // REVERT: Relaxed prompt. Removed "VERBATIM" strictness.
+  // This allows the model to process large text without hitting token limits/timeouts as easily.
   const prompt = `
-    TASK: Extract manuscript data into valid JSON.
-    
-    RULES:
-    1. VERBATIM MODE: Extract content exactly as is. Do not summarize sentences.
-    2. STRUCTURE: Identify Title, Authors, Abstract, Keywords, Sections (IMRAD), and References.
-    3. CLEANING: Remove page numbers, running heads, and "Figure X" placeholders.
-    4. LONG TEXT: If the text is extremely long, ensure the JSON structure remains valid (close all brackets).
-    
-    INPUT TEXT:
+    You are an AI Assistant for the Journal of Biomedical Sciences and Health (JBSH).
+    Convert the raw manuscript text below into a structured JSON object.
+
+    Instructions:
+    1. Organize the content into: Title, Authors, Abstract, Keywords, Sections (IMRAD), and References.
+    2. Preserve the core content and paragraphs. 
+    3. Fix obvious formatting issues (like line breaks in the middle of sentences).
+    4. Remove page numbers or running headers.
+    5. Ensure the Output is Valid JSON.
+
+    Input Text:
     ${text}
   `;
 
@@ -100,8 +100,8 @@ export const parseManuscript = async (text: string): Promise<ManuscriptData> => 
   for (const modelName of modelsToTry) {
     console.log(`Attempting parse with model: ${modelName}`);
     
-    // Retry loop for transient errors (up to 3 times per model)
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    // Retry up to 2 times per model
+    for (let attempt = 1; attempt <= 2; attempt++) {
       try {
         const response = await ai.models.generateContent({
           model: modelName,
@@ -109,22 +109,16 @@ export const parseManuscript = async (text: string): Promise<ManuscriptData> => 
           config: {
             responseMimeType: "application/json",
             responseSchema: manuscriptSchema,
-            temperature: 0, // Deterministic
-            maxOutputTokens: 8192, 
+            temperature: 0.1, // Slight flexibility helps with completion
           },
         });
 
         if (response.text) {
-          // 1. Clean Markdown blocks if present
           let cleanText = response.text.replace(/```json/g, '').replace(/```/g, '').trim();
-          
-          // 2. Attempt to parse
           const parsed = JSON.parse(cleanText) as ManuscriptData;
           
-          // 3. Basic validation
           if (!parsed.title || !parsed.sections) throw new Error("Incomplete data structure.");
 
-          // Success! Add default JBSH metadata
           return {
             ...parsed,
             doi: "10.xxxxx/jbsh.vX.iX.xxxx",
@@ -139,30 +133,20 @@ export const parseManuscript = async (text: string): Promise<ManuscriptData> => 
             logoUrl: "https://raw.githubusercontent.com/stackblitz/stackblitz-images/main/jbsh-logo-placeholder.png" 
           };
         }
-        throw new Error("Empty response from AI");
+        throw new Error("Empty response");
 
       } catch (error: any) {
         console.warn(`Attempt ${attempt} with ${modelName} failed:`, error);
         lastError = error;
-
-        // If error is 503 (Server Busy) or 429 (Too Many Requests), wait and retry
-        if (error.message?.includes("503") || error.message?.includes("429") || error.message?.includes("500")) {
-          await sleep(2500 * attempt); // Exponential backoff: 2.5s, 5s, 7.5s
+        
+        if (error.message?.includes("503") || error.message?.includes("429")) {
+          await sleep(2000); 
           continue;
         }
-
-        // If JSON syntax error (truncated output), break inner loop to switch model immediately
-        if (error instanceof SyntaxError || error.message?.includes("JSON")) {
-            console.warn("JSON Truncation detected. Switching model...");
-            break; 
-        }
-
-        // Other errors (Auth, Bad Request) -> Stop immediately
-        break;
+        break; // Break on other errors to try next model
       }
     }
   }
 
-  // If all attempts with all models fail
-  throw new Error(`Failed to process manuscript. Server was busy or text was too long. (Last error: ${lastError?.message})`);
+  throw new Error(`Failed to process manuscript. Please try pasting smaller sections or use Manual Mode.`);
 };
