@@ -103,15 +103,18 @@ const App: React.FC = () => {
 
   // --- VALIDATION LOGIC ---
   const runValidation = (original: string, generated: ManuscriptData) => {
-      // 1. Helper to clean text and get words array
+      // Helper to clean text and get words array for accurate comparison
       const getWords = (text: string) => {
           return text
-            .replace(/<[^>]*>/g, ' ') // Strip HTML
-            .replace(/\[FIGURE REMOVED\]/g, ' ')
+            .replace(/<[^>]*>/g, ' ') // Strip HTML tags
+            .replace(/\[FIGURE REMOVED\]/g, ' ') // Ignore placeholders
+            .replace(/&nbsp;/g, ' ')
             .replace(/[^\w\s]/g, '') // Remove punctuation
+            .replace(/\s+/g, ' ') // Collapse whitespace
+            .trim()
             .toLowerCase()
-            .split(/\s+/)
-            .filter(w => w.length > 3); // Only count significant words > 3 chars
+            .split(' ')
+            .filter(w => w.length > 2); // Ignore very short words like 'at', 'in'
       };
 
       const originalWords = getWords(original);
@@ -133,50 +136,46 @@ const App: React.FC = () => {
       const genCount = generatedWords.length;
 
       // 3. Keyword Coverage (Intersection)
-      const uniqueOriginalWords = new Set(originalWords);
+      // Check how many words from the ORIGINAL exist in the GENERATED
       let foundCount = 0;
-      uniqueOriginalWords.forEach(w => {
+      originalWords.forEach(w => {
           if (generatedWordSet.has(w)) foundCount++;
       });
       
-      const coverage = uniqueOriginalWords.size > 0 
-        ? Math.round((foundCount / uniqueOriginalWords.size) * 100) 
+      // Calculate percentage based on original words found
+      const coverage = origCount > 0 
+        ? Math.round((foundCount / origCount) * 100) 
         : 0;
-        
-      // 4. Missing Structure Check (Section B: Identifikasi bagian yang kurang)
+      
+      // Allow some leeway (e.g., cleaned artifacts, running heads) - Cap at 100%
+      const adjustedCoverage = Math.min(100, coverage); 
+
+      // 4. Missing Structure Check
       const requiredSections = ['Introduction', 'Method', 'Result', 'Discussion', 'Conclusion'];
       const currentHeadings = generated.sections.map(s => s.heading.toLowerCase());
       const missingSections = requiredSections.filter(req => 
           !currentHeadings.some(h => h.includes(req.toLowerCase()))
       );
 
-      // 5. Formatting & Quality Checks (Section C: Kesalahan Penulisan)
+      // 5. Formatting Issues
       const formattingIssues: string[] = [];
-      
-      // Check for Word artifacts (common in docx to text conversion)
       if (generatedContent.includes("Error! Reference source not found")) {
-          formattingIssues.push("Found 'Error! Reference source not found' artifact.");
+          formattingIssues.push("Found 'Error! Reference source' artifact.");
       }
-      
-      // Check for leftover placeholders
       if (/\[\s*(?:insert|figure|table).*\]/i.test(generatedContent)) {
-          formattingIssues.push("Potential placeholder text detected (e.g., [Insert Figure]).");
-      }
-
-      // Check for space before punctuation (e.g. "word .") - Common typing error
-      if (/[a-z]{2,}\s+[\.,;:]/.test(generatedContent)) {
-           formattingIssues.push("Incorrect spacing detected before punctuation (e.g., 'word .').");
+          formattingIssues.push("Potential placeholder text detected.");
       }
 
       // 6. Determine Status
       let status: 'success' | 'warning' | 'danger' = 'success';
-      if (coverage < 70 || genCount < origCount * 0.6 || missingSections.length > 2) status = 'danger';
-      else if (coverage < 85 || genCount < origCount * 0.8 || missingSections.length > 0 || formattingIssues.length > 0) status = 'warning';
+      // Thresholds: Danger if < 80%, Warning if < 95%
+      if (adjustedCoverage < 80 || genCount < origCount * 0.7 || missingSections.length > 2) status = 'danger';
+      else if (adjustedCoverage < 95 || genCount < origCount * 0.9 || missingSections.length > 0 || formattingIssues.length > 0) status = 'warning';
 
       setValidationStats({
           originalWordCount: origCount,
           generatedWordCount: genCount,
-          coveragePercent: coverage,
+          coveragePercent: adjustedCoverage,
           status,
           missingSections,
           formattingIssues
@@ -195,11 +194,9 @@ const App: React.FC = () => {
        reader.onload = async (e) => {
          const arrayBuffer = e.target?.result as ArrayBuffer;
          try {
-           // 1. Convert to HTML to get structure and IMAGES
            const result = await mammoth.convertToHtml({ arrayBuffer });
            const fullHtml = result.value;
            
-           // 2. Extract Images from the HTML result locally
            const extractedFigures: ManuscriptFigure[] = [];
            const parser = new DOMParser();
            const doc = parser.parseFromString(fullHtml, 'text/html');
@@ -216,10 +213,7 @@ const App: React.FC = () => {
                }
            });
 
-           // 3. Remove heavy base64 images from text before sending to Gemini to save tokens
-           // We keep the rest of the HTML (tables, paragraphs) intact.
            const cleanHtmlForAI = fullHtml.replace(/<img[^>]*>/g, '[FIGURE REMOVED]');
-
            setRawText(cleanHtmlForAI);
            processManuscript(cleanHtmlForAI, extractedFigures);
 
@@ -230,12 +224,9 @@ const App: React.FC = () => {
        };
        reader.readAsArrayBuffer(file);
     } else if (fileName.endsWith('.html') || fileName.endsWith('.htm')) {
-       // HTML File Support
        const reader = new FileReader();
        reader.onload = async (e) => {
          const text = e.target?.result as string;
-         
-         // Try to extract images if they are embedded base64
          const extractedFigures: ManuscriptFigure[] = [];
          try {
              const parser = new DOMParser();
@@ -259,7 +250,6 @@ const App: React.FC = () => {
        };
        reader.readAsText(file);
     } else {
-       // Assume text/md
        const reader = new FileReader();
        reader.onload = async (e) => {
          const text = e.target?.result as string;
@@ -285,22 +275,18 @@ const App: React.FC = () => {
     try {
       const data = await parseManuscript(text);
       
-      // Inject Default Logo if not provided by parser
       if (!data.logoUrl || data.logoUrl.includes('placeholder')) {
          data.logoUrl = DEFAULT_LOGO_URL;
       }
       
-      // Force Title Case
       data.title = toTitleCase(data.title);
 
-      // MERGE FIGURES: Use extracted figures from Docx if available, otherwise empty
       if (initialFigures.length > 0) {
           data.figures = initialFigures;
       } else if (!data.figures) {
           data.figures = [];
       }
 
-      // RUN VALIDATION
       runValidation(text, data);
 
       setManuscriptData(data);
@@ -348,7 +334,6 @@ const App: React.FC = () => {
           const response = await fetch(url);
           const blob = await response.blob();
           const data = await blob.arrayBuffer();
-          // We ignore type detection here as docx handles it from magic bytes
           return { data };
       } catch (e) {
           console.error("Failed to fetch image for docx", e);
@@ -357,14 +342,13 @@ const App: React.FC = () => {
   };
 
   const stripHtmlToText = (html: string) => {
-    // Rudimentary stripping for DOCX text run fallback
     let text = html;
     text = text.replace(/<br\s*\/?>/gi, '\n');
-    text = text.replace(/<\/p>/gi, '\n\n'); // IMPORTANT: Newlines between paragraphs
-    text = text.replace(/<\/tr>/gi, '\n'); // Table row to newline
-    text = text.replace(/<\/td>/gi, '\t'); // Table cell to tab
+    text = text.replace(/<\/p>/gi, '\n\n'); 
+    text = text.replace(/<\/tr>/gi, '\n'); 
+    text = text.replace(/<\/td>/gi, '\t');
     text = text.replace(/<\/th>/gi, '\t');
-    text = text.replace(/<[^>]+>/g, ''); // Strip all other tags
+    text = text.replace(/<[^>]+>/g, '');
     return text.trim();
   };
 
@@ -377,16 +361,13 @@ const App: React.FC = () => {
         const bodyChildren = [];
         const journalBlue = "005580";
 
-        // Logic for unique affiliations (same as preview)
         const uniqueAffiliations = Array.from(new Set(manuscriptData.authors.map(a => a.affiliation)));
         const getAffiliationIndex = (aff: string) => uniqueAffiliations.indexOf(aff) + 1;
 
-        // --- PREPARE LOGO ---
         let logoImageRun: any = new Paragraph("");
         if (manuscriptData.logoUrl) {
             try {
                 const { data: logoBuffer } = await getImageBuffer(manuscriptData.logoUrl);
-                // Note: ImageRun automatically detects type from buffer signature in docx v8.x
                 logoImageRun = new Paragraph({
                     children: [
                         new ImageRun({
@@ -401,8 +382,6 @@ const App: React.FC = () => {
             }
         }
 
-        // --- FRONT MATTER (Header, Access, DOI, Title, etc.) ---
-        // 1. Header Table
         const headerTable = new Table({
             width: { size: 100, type: WidthType.PERCENTAGE },
             borders: {
@@ -442,7 +421,6 @@ const App: React.FC = () => {
         });
         frontMatterChildren.push(headerTable);
 
-        // 2. Open Access Bar
         const openAccessTable = new Table({
             width: { size: 100, type: WidthType.PERCENTAGE }, 
             rows: [
@@ -468,7 +446,6 @@ const App: React.FC = () => {
         frontMatterChildren.push(openAccessTable);
         frontMatterChildren.push(new Paragraph({ text: "", spacing: { after: 100 } })); 
 
-        // 3. Vol/DOI Line
         frontMatterChildren.push(
             new Paragraph({
                 children: [
@@ -481,13 +458,11 @@ const App: React.FC = () => {
             })
         );
 
-        // 4. Article Type & Title (Apply Title Case)
         frontMatterChildren.push(
             new Paragraph({ children: [new TextRun({ text: "Original Research Article", italics: true, font: "Georgia", size: 22 })], alignment: AlignmentType.CENTER, spacing: { after: 200 } }),
             new Paragraph({ children: [new TextRun({ text: toTitleCase(manuscriptData.title), bold: true, size: 28, font: "Georgia" })], alignment: AlignmentType.CENTER, spacing: { after: 300 } })
         );
 
-        // 6. Authors (Fixed Grouping)
         const authorsParagraph = new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 100 } });
         manuscriptData.authors.forEach((a, i) => {
             const cleanName = a.name.replace(/[0-9]+$/, ''); 
@@ -500,7 +475,6 @@ const App: React.FC = () => {
         });
         frontMatterChildren.push(authorsParagraph);
 
-        // 7. Affiliations (Unique List)
         uniqueAffiliations.forEach((aff, i) => {
              frontMatterChildren.push(
                 new Paragraph({
@@ -525,7 +499,6 @@ const App: React.FC = () => {
              frontMatterChildren.push(new Paragraph({ text: "", spacing: { after: 400 } }));
         }
 
-        // 8. Abstract
         const abstractTable = new Table({
             width: { size: 100, type: WidthType.PERCENTAGE },
             borders: { top: { style: BorderStyle.SINGLE, size: 18, color: journalBlue }, bottom: { style: BorderStyle.SINGLE, size: 6, color: journalBlue }, right: { style: BorderStyle.SINGLE, size: 4, color: "CCCCCC" }, left: { style: BorderStyle.SINGLE, size: 4, color: "CCCCCC" }, insideVertical: { style: BorderStyle.NONE }, insideHorizontal: { style: BorderStyle.NONE },
@@ -538,7 +511,6 @@ const App: React.FC = () => {
                             children: [
                                 new Paragraph({ children: [new TextRun({ text: "ABSTRACT", bold: true, color: journalBlue, font: "Arial", size: 20 })], alignment: AlignmentType.CENTER, spacing: { before: 100, after: 200 } }),
                                 new Paragraph({ children: [new TextRun({ text: manuscriptData.abstract, font: "Georgia", size: 20 })], alignment: AlignmentType.JUSTIFIED, spacing: { after: 200 } }),
-                                // FIX: Justify Keywords
                                 new Paragraph({ 
                                     children: [new TextRun({ text: "Keywords: ", bold: true, font: "Georgia", size: 20 }), new TextRun({ text: manuscriptData.keywords.join("; "), font: "Georgia", size: 20 })], 
                                     spacing: { after: 100 },
@@ -554,7 +526,6 @@ const App: React.FC = () => {
         frontMatterChildren.push(abstractTable);
         frontMatterChildren.push(new Paragraph({ text: "", spacing: { after: 200 } }));
 
-        // 9. Dates, Citation, Access
         frontMatterChildren.push(new Paragraph({ children: [new TextRun({ text: "Received: ", bold: true, color: journalBlue, font: "Arial", size: 16 }), new TextRun({ text: `${manuscriptData.receivedDate} | `, font: "Arial", size: 16 }), new TextRun({ text: "Accepted: ", bold: true, color: journalBlue, font: "Arial", size: 16 }), new TextRun({ text: `${manuscriptData.acceptedDate} | `, font: "Arial", size: 16 }), new TextRun({ text: "Published: ", bold: true, color: journalBlue, font: "Arial", size: 16 }), new TextRun({ text: `${manuscriptData.publishedDate}`, font: "Arial", size: 16 })], alignment: AlignmentType.CENTER, border: { top: { style: BorderStyle.SINGLE, size: 4, space: 1, color: "DDDDDD" } }, spacing: { before: 200, after: 200 } }));
         const citationAuthors = manuscriptData.authors.length > 2 ? `${manuscriptData.authors[0].name} et al.` : manuscriptData.authors.map(a => a.name).join(' & ');
         const citationTable = new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, borders: { top: { style: BorderStyle.NONE }, bottom: { style: BorderStyle.NONE }, right: { style: BorderStyle.NONE }, left: { style: BorderStyle.SINGLE, size: 24, color: journalBlue }, insideVertical: { style: BorderStyle.NONE }, insideHorizontal: { style: BorderStyle.NONE }, }, rows: [ new TableRow({ children: [ new TableCell({ shading: { fill: "F0F9FF", type: ShadingType.CLEAR }, children: [ new Paragraph({ children: [ new TextRun({ text: "Cite this article: ", bold: true, color: journalBlue, font: "Arial", size: 16 }), new TextRun({ text: `${citationAuthors} (${manuscriptData.year}). ${manuscriptData.title}. `, font: "Georgia", size: 16 }), new TextRun({ text: "Journal of Biomedical Sciences and Health", italics: true, font: "Georgia", size: 16 }), new TextRun({ text: `, ${manuscriptData.volume}(${manuscriptData.issue}), ${manuscriptData.pages}. https://doi.org/${manuscriptData.doi}`, font: "Georgia", size: 16 }) ], alignment: AlignmentType.JUSTIFIED }) ], margins: { left: 100, right: 100, top: 100, bottom: 100 } }) ] }) ] });
@@ -574,39 +545,30 @@ const App: React.FC = () => {
         frontMatterChildren.push(openAccessBoxTable);
         frontMatterChildren.push(new Paragraph({ text: "", spacing: { after: 400 } }));
 
-        // --- BODY with Inline Figures ---
         const placedFigures = new Set<string>();
 
         for (const section of manuscriptData.sections) {
-            // Heading is ALWAYS left aligned, no indent
             bodyChildren.push(new Paragraph({ 
                 children: [new TextRun({ text: section.heading, bold: true, color: "000000", font: "Arial", size: 22 })], 
                 heading: HeadingLevel.HEADING_1, 
                 spacing: { before: 200, after: 100 },
-                indent: { firstLine: 0 } // Explicitly 0 for headings
+                indent: { firstLine: 0 } 
             }));
             
-            // Split content into paragraphs to inject figures between them
             const paragraphs = stripHtmlToText(section.content).split(/\n\n+/);
             
             for (const paraText of paragraphs) {
                 if (!paraText.trim()) continue;
 
-                // DETECT SUBHEADINGS within content
-                // Heuristic: Short length (< 80 chars) AND (Starts with Number OR All Caps)
                 const isHeading = paraText.length < 80 && (/^\d+\./.test(paraText.trim()) || /^[A-Z\s\W]+$/.test(paraText.trim()));
                 
-                // MAIN BODY PARAGRAPHS - Add First Line Indent (1cm ~ 567 twips)
-                // If it looks like a subheading, indent is 0
                 bodyChildren.push(new Paragraph({ 
                     children: [new TextRun({ text: paraText, font: "Georgia", size: 21, bold: isHeading })], 
                     alignment: AlignmentType.JUSTIFIED, 
                     spacing: { after: 200 },
-                    indent: { firstLine: isHeading ? 0 : 567 } // 1cm Indent for paragraphs, 0 for headings
+                    indent: { firstLine: isHeading ? 0 : 567 } 
                 }));
 
-                // Check for Figure matches (e.g., "Figure 1") in this paragraph
-                // Logic: Find the FIRST occurrence, if matched and not yet placed, insert it.
                 const regex = /(?:Figure|Fig\.?)\s*(\d+)/gi;
                 let match;
                 while ((match = regex.exec(paraText)) !== null) {
@@ -633,7 +595,6 @@ const App: React.FC = () => {
             }
         }
 
-        // Remaining Figures (Fallback)
         const remainingFigures = manuscriptData.figures.filter(f => !placedFigures.has(f.id));
         if (remainingFigures.length > 0) {
             bodyChildren.push(new Paragraph({ children: [new TextRun({ text: "ADDITIONAL FIGURES", bold: true, font: "Arial", size: 22 })], spacing: { before: 400, after: 200 } }));
@@ -650,11 +611,8 @@ const App: React.FC = () => {
             }
         }
 
-        // References
         bodyChildren.push( new Paragraph({ children: [new TextRun({ text: "REFERENCES", bold: true, font: "Arial", size: 22 })], heading: HeadingLevel.HEADING_1, spacing: { before: 400, after: 200 }, border: { top: { style: BorderStyle.SINGLE, size: 6 } } }) );
         manuscriptData.references.forEach((ref) => {
-             // Hanging indent for APA - 1cm (567 twips)
-             // Indent entire block left by 1cm, then pull first line back by 1cm
              bodyChildren.push( new Paragraph({ 
                  children: [new TextRun({ text: ref, font: "Georgia", size: 18 })], 
                  alignment: AlignmentType.JUSTIFIED, 
@@ -663,7 +621,6 @@ const App: React.FC = () => {
             }) );
         });
 
-        // --- FOOTERS/HEADERS ---
         const footerPage1 = new Footer({ children: [ new Paragraph({ children: [] }) ] });
         const footerDefault = new Footer({
             children: [

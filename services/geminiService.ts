@@ -16,7 +16,7 @@ const sectionSchema: Schema = {
   type: Type.OBJECT,
   properties: {
     heading: { type: Type.STRING, description: "The section title (e.g., Introduction, Methods)" },
-    content: { type: Type.STRING, description: "The FULL body text/HTML of the section. Keep all paragraphs and TABLES (<table>...</table>) intact. Do not summarize." },
+    content: { type: Type.STRING, description: "The FULL body text of the section. MUST BE WORD-FOR-WORD IDENTICAL to the input. Do not skip a single sentence." },
   },
   required: ["heading", "content"],
 };
@@ -37,23 +37,31 @@ const manuscriptSchema: Schema = {
 export const parseManuscript = async (text: string): Promise<ManuscriptData> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
+  // PENTING: Prompt ini dibuat sangat agresif agar AI tidak "malas" atau meringkas.
   const prompt = `
-    You are a strict Document Parser and Formatter for the journal 'JBSH'.
-    Your ONLY task is to structure the raw manuscript into JSON.
+    TASK: Convert the raw manuscript text into a structured JSON object exactly.
     
-    CRITICAL RULES FOR CONTENT PRESERVATION (STRICT VERBATIM MODE):
-    1. **NO SUMMARIZATION**: You are FORBIDDEN from shortening any text.
-    2. **NO EDITING**: Do not fix grammar, do not improve style, do not remove redundancy. Copy the text EXACTLY as it appears in the body paragraphs.
-    3. **PRESERVE HTML**: If the input contains HTML tables (<table>), YOU MUST PRESERVE THEM EXACTLY.
-    4. **CLEAN NOISE ONLY**: Only remove obvious artifacts like page numbers ("Page 1 of 5"), running heads, or "Insert Figure 1 Here" placeholders. Do NOT remove actual content sentences.
+    CRITICAL INSTRUCTION: **DATA INTEGRITY IS PARAMOUNT.**
     
-    Structure Requirements:
-    - Extract Title, Authors (with affiliations), Abstract, and Keywords.
-    - Organize body text into Sections (Introduction, Methods, Results, Discussion, Conclusion).
-    - Extract References list formatted strictly in APA 7th style.
+    1. **VERBATIM COPYING**: You are acting as a Data Extractor, NOT an Editor.
+       - Do NOT summarize.
+       - Do NOT correct grammar.
+       - Do NOT fix typos.
+       - Do NOT improve the writing style.
+       - COPY every single paragraph from Introduction, Methods, Results, Discussion, and Conclusion EXACTLY as they appear.
 
-    Raw Manuscript Content:
+    2. **HANDLING LENGTH**: The input text is long. Do not truncate the output. If a section (e.g., Discussion) is 1000 words, your output for that section MUST be 1000 words.
+    
+    3. **HTML PRESERVATION**: If you see HTML tables (<table>) or specific formatting, keep them.
+
+    4. **CLEANING**: The ONLY thing you are allowed to remove are artifacts like:
+       - "Page 1 of 12"
+       - Repeated journal headers/footers.
+       - "Insert Figure X Here" placeholders (ONLY if you are sure they are placeholders).
+    
+    INPUT TEXT START:
     ${text}
+    INPUT TEXT END
   `;
 
   try {
@@ -63,17 +71,22 @@ export const parseManuscript = async (text: string): Promise<ManuscriptData> => 
       config: {
         responseMimeType: "application/json",
         responseSchema: manuscriptSchema,
-        systemInstruction: "You are a robotic parser. Your goal is 100% data fidelity. Output the input text word-for-word into the correct JSON fields. Do not act as an editor.",
+        // Temperature 0 forces the model to be deterministic and non-creative (prevents hallucination/rewriting)
+        temperature: 0,
+        // High token limit to ensure full manuscript generation
+        maxOutputTokens: 8192, 
+        systemInstruction: "You are a specialized Copy-Paste Engine. Your goal is 100% text match. If the input has 2000 words, the output must have 2000 words. Do not shorten any section.",
       },
     });
 
     if (response.text) {
       const parsed = JSON.parse(response.text) as ManuscriptData;
-      // Add default metadata for JBSH if missing
+      
+      // Post-processing to ensure data validity
       return {
         ...parsed,
         doi: "10.xxxxx/jbsh.vX.iX.xxxx",
-        volume: "1",
+        volume: "3",
         issue: "1",
         year: new Date().getFullYear().toString(),
         pages: "1-12",
@@ -87,6 +100,6 @@ export const parseManuscript = async (text: string): Promise<ManuscriptData> => 
     throw new Error("Empty response from AI");
   } catch (error) {
     console.error("Gemini Parsing Error:", error);
-    throw new Error("Failed to parse manuscript. The file might be too large for the output limit, or the format is unrecognized.");
+    throw new Error("Failed to parse manuscript. Please try again or check if the file text is readable.");
   }
 };
