@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ManuscriptData, AppState, ManuscriptFigure } from './types';
-import { parseManuscript } from './services/geminiService';
+import { parseManuscript, createManualManuscript } from './services/geminiService';
 import { LayoutPreview } from './components/LayoutPreview';
-import { Upload, FileText, Printer, ChevronLeft, RefreshCw, AlertCircle, ArrowRight, Image as ImageIcon, Plus, Trash2, FileDown, Edit, Check, Save, LogIn, User, LogOut, Home, FileSearch, Info, AlertTriangle, CheckCircle, SearchX } from 'lucide-react';
+import { Upload, FileText, Printer, ChevronLeft, RefreshCw, AlertCircle, ArrowRight, Image as ImageIcon, Plus, Trash2, FileDown, Edit, Check, Save, LogIn, User, LogOut, Home, FileSearch, Info, AlertTriangle, CheckCircle, SearchX, ZapOff } from 'lucide-react';
 import mammoth from 'mammoth';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, ImageRun, SectionType, BorderStyle, Table, TableRow, TableCell, WidthType, ShadingType, Header, Footer, PageNumber, VerticalAlign } from "docx";
 import FileSaver from "file-saver";
@@ -261,12 +261,39 @@ const App: React.FC = () => {
   };
 
   const handleManualText = () => {
-      if (rawText.trim().length < 50) {
+      if (rawText.trim().length < 20) {
           setError("Text is too short. Please paste the full manuscript.");
           return;
       }
       processManuscript(rawText);
   }
+
+  const handleManualProcessing = () => {
+     if (rawText.trim().length < 1) {
+         setError("Please paste or upload content first.");
+         return;
+     }
+     setError(null);
+     setAppState(AppState.PROCESSING);
+     // Simulate slight delay for UI feel
+     setTimeout(() => {
+         const data = createManualManuscript(rawText);
+         if (!data.logoUrl || data.logoUrl.includes('placeholder')) {
+             data.logoUrl = DEFAULT_LOGO_URL;
+         }
+         // Set validation stats to 'Manual' (100% implicitly)
+         setValidationStats({
+             originalWordCount: rawText.split(' ').length,
+             generatedWordCount: rawText.split(' ').length,
+             coveragePercent: 100,
+             status: 'success',
+             missingSections: [],
+             formattingIssues: ["Manual Mode Active - Please organize content manually"]
+         });
+         setManuscriptData(data);
+         setAppState(AppState.METADATA_REVIEW);
+     }, 800);
+  };
 
   const processManuscript = async (text: string, initialFigures: ManuscriptFigure[] = []) => {
     setAppState(AppState.PROCESSING);
@@ -879,7 +906,17 @@ const App: React.FC = () => {
                     <p className="opacity-90">Upload manuscript to generate a professional Scopus-level layout.</p>
                 </div>
                 <div className="p-8">
-                    {error && (<div className="bg-red-50 text-red-700 p-4 rounded-lg mb-6 flex items-center gap-3 border border-red-200"><AlertCircle size={20} />{error}</div>)}
+                    {error && (
+                        <div className="bg-red-50 text-red-700 p-4 rounded-lg mb-6 flex flex-col gap-2 border border-red-200">
+                             <div className="flex items-center gap-3"><AlertCircle size={20} /> <span className="font-bold">Error:</span> {error}</div>
+                             <div className="pl-8 text-sm">
+                                 <p className="mb-2">If AI is failing, you can skip it and edit manually:</p>
+                                 <button onClick={handleManualProcessing} className="bg-white border border-red-200 text-red-600 px-3 py-1.5 rounded font-bold text-xs hover:bg-red-50 transition-colors flex items-center gap-2 inline-flex">
+                                     <ZapOff size={14} /> Switch to Manual Mode
+                                 </button>
+                             </div>
+                        </div>
+                    )}
                     <div className="border-2 border-dashed border-slate-300 rounded-lg p-10 text-center hover:bg-slate-50 transition-colors group relative cursor-pointer">
                         <div className="flex flex-col items-center gap-4 relative z-0"><div className="p-4 bg-sky-50 text-[#007398] rounded-full group-hover:scale-110 transition-transform"><Upload size={32} /></div><div><h3 className="font-bold text-slate-800 text-lg">Upload Manuscript File</h3><p className="text-slate-500 text-sm mt-1">Supports .docx, .html, .txt, .md</p></div></div>
                         <input type="file" accept=".docx,.txt,.md,.html,.htm" onChange={handleFileUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-50"/>
@@ -887,7 +924,15 @@ const App: React.FC = () => {
                     <div className="mt-8">
                         <label className="block text-sm font-medium text-slate-700 mb-2">Or paste manuscript text directly:</label>
                         <textarea className="w-full h-48 border border-slate-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-[#007398] outline-none resize-none font-serif" placeholder="Paste Title, Abstract, Introduction, etc. here..." value={rawText} onChange={(e) => setRawText(e.target.value)} />
-                        <button onClick={handleManualText} className="w-full mt-4 bg-slate-900 text-white py-3 rounded-lg font-medium hover:bg-slate-800 transition-colors flex justify-center items-center gap-2"><FileText size={18} />Process Manuscript</button>
+                        
+                        <div className="flex gap-3 mt-4">
+                            <button onClick={handleManualText} className="flex-1 bg-slate-900 text-white py-3 rounded-lg font-medium hover:bg-slate-800 transition-colors flex justify-center items-center gap-2">
+                                <FileText size={18} /> Process with AI
+                            </button>
+                            <button onClick={handleManualProcessing} className="flex-1 bg-white text-slate-700 border border-slate-300 py-3 rounded-lg font-medium hover:bg-slate-50 transition-colors flex justify-center items-center gap-2" title="Bypass AI if server is busy">
+                                <ZapOff size={18} /> Skip AI (Manual)
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
