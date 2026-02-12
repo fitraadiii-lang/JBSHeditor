@@ -99,8 +99,8 @@ export const createManualManuscript = (text: string): ManuscriptData => {
 export const parseManuscript = async (text: string): Promise<ManuscriptData> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  // Prioritize Pro for quality (higher QC score), fallback to Flash if Pro fails
-  const modelsToTry = ["gemini-3-pro-preview", "gemini-3-flash-preview"];
+  // Back to Pro for high QC Score as requested
+  const modelsToTry = ["gemini-3-pro-preview"];
 
   const prompt = `
     You are an AI Assistant for the Journal of Biomedical Sciences and Health (JBSH).
@@ -134,7 +134,7 @@ export const parseManuscript = async (text: string): Promise<ManuscriptData> => 
             responseMimeType: "application/json",
             responseSchema: manuscriptSchema,
             temperature: 0.1, // Slight flexibility helps with completion
-            maxOutputTokens: 8192, // High limit to prevent "unterminated string" on long manuscripts (Applied to BOTH models)
+            maxOutputTokens: 8192, // High limit to prevent "unterminated string" on long manuscripts
           },
         });
 
