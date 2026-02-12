@@ -36,6 +36,22 @@ const manuscriptSchema: Schema = {
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
+const generateLoaBody = (title: string, vol: string, issue: string, year: string) => `
+<p>Dear Author(s),</p>
+<p>We are pleased to inform you that your manuscript titled:</p>
+<div style="background-color: #f8fafc; padding: 12px; border: 1px solid #e2e8f0; border-radius: 4px; margin: 12px 0; font-style: italic; font-weight: bold; text-align: center; font-size: 0.9em;">
+    "${title}"
+</div>
+<p>
+    Has been <strong>ACCEPTED</strong> for publication in the <strong>Journal of Biomedical Sciences and Health (JBSH)</strong>, 
+    Volume ${vol}, Issue ${issue}, ${year}.
+</p>
+<p>
+    The manuscript has gone through a peer-review process, and our reviewers have recommended it for publication. 
+    We appreciate your contribution to the biomedical and health sciences community.
+</p>
+`;
+
 // --- MANUAL MODE (Helper) ---
 export const createManualManuscript = (text: string): ManuscriptData => {
   const cleanText = text.replace(/<[^>]*>/g, '\n').trim(); 
@@ -43,6 +59,11 @@ export const createManualManuscript = (text: string): ManuscriptData => {
   
   const title = lines.length > 0 ? lines[0] : "Untitled Manuscript";
   const bodyContent = lines.slice(1).join('\n\n') || "Paste your manuscript content here...";
+
+  const vol = "3";
+  const issue = "1";
+  const year = new Date().getFullYear().toString();
+  const acceptedDate = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 
   return {
     title: title,
@@ -59,15 +80,19 @@ export const createManualManuscript = (text: string): ManuscriptData => {
     ],
     references: ["Reference 1"],
     doi: "10.xxxxx/jbsh.vX.iX.xxxx",
-    volume: "3",
-    issue: "1",
-    year: new Date().getFullYear().toString(),
+    volume: vol,
+    issue: issue,
+    year: year,
     pages: "1-12",
     receivedDate: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }),
-    acceptedDate: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }),
+    acceptedDate: acceptedDate,
     publishedDate: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }),
     figures: [],
-    logoUrl: "https://raw.githubusercontent.com/stackblitz/stackblitz-images/main/jbsh-logo-placeholder.png"
+    logoUrl: "https://raw.githubusercontent.com/stackblitz/stackblitz-images/main/jbsh-logo-placeholder.png",
+    // LoA Defaults
+    loaNumber: `JBSH/${year}/LOA/${Math.floor(Math.random() * 1000).toString().padStart(4, '0')}`,
+    loaDate: acceptedDate,
+    loaBody: generateLoaBody(title, vol, issue, year)
   };
 };
 
@@ -120,18 +145,27 @@ export const parseManuscript = async (text: string): Promise<ManuscriptData> => 
           
           if (!parsed.title || !parsed.sections) throw new Error("Incomplete data structure.");
 
+          const vol = "3";
+          const issue = "1";
+          const year = new Date().getFullYear().toString();
+          const acceptedDate = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+
           return {
             ...parsed,
             doi: "10.xxxxx/jbsh.vX.iX.xxxx",
-            volume: "3",
-            issue: "1",
-            year: new Date().getFullYear().toString(),
+            volume: vol,
+            issue: issue,
+            year: year,
             pages: "1-12",
             receivedDate: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }),
-            acceptedDate: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }),
+            acceptedDate: acceptedDate,
             publishedDate: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }),
             figures: [],
-            logoUrl: "https://raw.githubusercontent.com/stackblitz/stackblitz-images/main/jbsh-logo-placeholder.png" 
+            logoUrl: "https://raw.githubusercontent.com/stackblitz/stackblitz-images/main/jbsh-logo-placeholder.png",
+            // LoA Defaults
+            loaNumber: `JBSH/${year}/LOA/${Math.floor(Math.random() * 1000).toString().padStart(4, '0')}`,
+            loaDate: acceptedDate,
+            loaBody: generateLoaBody(parsed.title, vol, issue, year) 
           };
         }
         throw new Error("Empty response");

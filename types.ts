@@ -32,6 +32,10 @@ export interface ManuscriptData {
   acceptedDate?: string;
   publishedDate?: string;
   logoUrl?: string;
+  // LoA Specific Fields
+  loaNumber?: string;
+  loaDate?: string;
+  loaBody?: string;
 }
 
 export enum AppState {

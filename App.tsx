@@ -3,7 +3,8 @@ import { createRoot } from 'react-dom/client';
 import { ManuscriptData, AppState, ManuscriptFigure } from './types';
 import { parseManuscript, createManualManuscript } from './services/geminiService';
 import { LayoutPreview } from './components/LayoutPreview';
-import { Upload, FileText, Printer, ChevronLeft, RefreshCw, AlertCircle, ArrowRight, Image as ImageIcon, Plus, Trash2, FileDown, Edit, Check, Save, LogIn, User, LogOut, Home, FileSearch, Info, AlertTriangle, CheckCircle, SearchX, ZapOff, FileSignature, Mail, Settings, X, Send } from 'lucide-react';
+import { LoaTemplate } from './components/LoaTemplate';
+import { Upload, FileText, Printer, ChevronLeft, RefreshCw, AlertCircle, ArrowRight, Image as ImageIcon, Plus, Trash2, FileDown, Edit, Check, Save, LogIn, User, LogOut, Home, FileSearch, Info, AlertTriangle, CheckCircle, SearchX, ZapOff, FileSignature, Mail, Settings, X, Send, Layout, FileType, ExternalLink } from 'lucide-react';
 import mammoth from 'mammoth';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, ImageRun, SectionType, BorderStyle, Table, TableRow, TableCell, WidthType, ShadingType, Header, Footer, PageNumber, VerticalAlign } from "docx";
 import FileSaver from "file-saver";
@@ -13,6 +14,14 @@ import emailjs from '@emailjs/browser';
 const DEFAULT_LOGO_URL = "https://i.ibb.co.com/84Q0yL5/jbsh-logo.jpg";
 // Unlock icon for DOCX generation (Open Access Box)
 const UNLOCK_ICON_URL = "https://img.icons8.com/ios-glyphs/60/737373/unlock.png";
+
+// --- EMAILJS CONFIGURATION ---
+// Masukkan kredensial EmailJS Anda di sini
+const EMAIL_DEFAULTS = {
+    SERVICE_ID: "service_l0d7noh", // Service ID
+    TEMPLATE_ID: "template_dy9hdom", // Template ID yang baru
+    PUBLIC_KEY: "BBQB5tdjg4Hjlc-KZ"   // Public Key yang baru
+};
 
 // --- AUTHENTICATION CONFIG ---
 const ALLOWED_EMAILS = [
@@ -46,6 +55,7 @@ interface EmailConfig {
 const App: React.FC = () => {
   // Start at LOGIN state
   const [appState, setAppState] = useState<AppState>(AppState.LOGIN);
+  const [previewTab, setPreviewTab] = useState<'manuscript' | 'loa'>('manuscript');
   const [manuscriptData, setManuscriptData] = useState<ManuscriptData | null>(null);
   const [rawText, setRawText] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
@@ -56,10 +66,11 @@ const App: React.FC = () => {
   const [showEmailSettings, setShowEmailSettings] = useState(false);
   
   // Email Config State (Persisted in localStorage for convenience)
+  // Use EMAIL_DEFAULTS if localStorage is empty
   const [emailConfig, setEmailConfig] = useState<EmailConfig>({
-      serviceId: localStorage.getItem('jbsh_email_service_id') || '',
-      templateId: localStorage.getItem('jbsh_email_template_id') || '',
-      publicKey: localStorage.getItem('jbsh_email_public_key') || ''
+      serviceId: localStorage.getItem('jbsh_email_service_id') || EMAIL_DEFAULTS.SERVICE_ID,
+      templateId: localStorage.getItem('jbsh_email_template_id') || EMAIL_DEFAULTS.TEMPLATE_ID,
+      publicKey: localStorage.getItem('jbsh_email_public_key') || EMAIL_DEFAULTS.PUBLIC_KEY
   });
 
   // Auth State
@@ -105,6 +116,7 @@ const App: React.FC = () => {
     // Success
     setCurrentUser(loginEmail);
     setAppState(AppState.UPLOAD);
+    setPreviewTab('manuscript'); // Reset tab
     setError(null);
   };
 
@@ -123,6 +135,7 @@ const App: React.FC = () => {
       setRawText("");
       setError(null);
       setValidationStats(null);
+      setPreviewTab('manuscript');
   };
 
   // --- VALIDATION LOGIC ---
@@ -381,7 +394,11 @@ const App: React.FC = () => {
   };
 
   const getLoAPDFBlob = async (): Promise<Blob | null> => {
-      const element = document.getElementById('loa-template');
+      // Logic: If we are in "LoA" preview mode, we can capture the visible preview.
+      // But if we are in "Manuscript" mode, we must use the hidden template.
+      // To ensure consistent behavior, we will ALWAYS use the hidden template for generation.
+      // The hidden template is updated by React whenever `manuscriptData` changes.
+      const element = document.getElementById('loa-hidden-template');
       if (!element || !window.html2pdf) return null;
 
       // Ensure margin fixes are applied during capture
@@ -413,7 +430,7 @@ const App: React.FC = () => {
       if (!manuscriptData) return;
       setIsDownloading(true);
 
-      const element = document.getElementById('loa-template');
+      const element = document.getElementById('loa-hidden-template');
       
       const opt = {
         margin: 0, 
@@ -501,7 +518,25 @@ const App: React.FC = () => {
                 alert(`Email sent successfully to ${templateParams.to_email}!`);
             } catch (err: any) {
                 console.error("EmailJS Error:", err);
-                alert("Failed to send email. Check your settings or file size limits.\n\nError: " + JSON.stringify(err));
+                
+                // --- HANDLING FILE SIZE LIMIT (413) ---
+                // If file is too big for free tier, fallback to Manual mode gracefully
+                if (err.status === 413 || (err.text && err.text.includes("size limit"))) {
+                    const proceed = window.confirm(
+                        "File is too large for the free email server (Limit 50KB).\n\nSwitching to manual mode:\n1. The PDF will be downloaded automatically.\n2. Your email app will open.\n3. Simply attach the downloaded file and send.\n\nProceed?"
+                    );
+                    if (proceed) {
+                         // Download
+                         FileSaver.saveAs(pdfBlob, `LoA_JBSH_${manuscriptData.authors[0]?.name.split(' ').pop()}.pdf`);
+                         
+                         // Mailto
+                         const subject = `Letter of Acceptance - ${manuscriptData.title}`;
+                         const body = `Dear ${templateParams.to_name},\n\nWe are pleased to inform you that your manuscript titled "${manuscriptData.title}" has been ACCEPTED for publication in JBSH.\n\nPlease find the attached Letter of Acceptance.\n\nSincerely,\nJBSH Editor`;
+                         window.location.href = `mailto:${templateParams.to_email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+                    }
+                } else {
+                    alert("Failed to send email.\n\nError: " + JSON.stringify(err));
+                }
             } finally {
                 setIsSendingEmail(false);
             }
@@ -896,26 +931,47 @@ const App: React.FC = () => {
           <div className="flex items-center gap-2">
              {appState === AppState.PREVIEW && (
                  <>
-                    <button onClick={() => setIsEditingPreview(!isEditingPreview)} className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors shadow-sm ${isEditingPreview ? "bg-yellow-400 text-yellow-900 hover:bg-yellow-300" : "bg-white/20 hover:bg-white/30 text-white backdrop-blur-sm"}`}>{isEditingPreview ? <Check size={16} /> : <Edit size={16} />}{isEditingPreview ? "Done Editing" : "Edit Preview"}</button>
-                    <button onClick={() => setAppState(AppState.METADATA_REVIEW)} className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm bg-white/20 hover:bg-white/30 text-white transition-colors backdrop-blur-sm"><ChevronLeft size={16} />Metadata</button>
-                    <button onClick={handleDownloadPDF} disabled={isDownloading} className="flex items-center gap-2 bg-rose-600 hover:bg-rose-500 text-white px-4 py-1.5 rounded-md text-sm font-medium transition-colors shadow-sm">{isDownloading ? (<div className="animate-spin h-4 w-4 border-2 border-white rounded-full border-t-transparent"></div>) : (<Save size={16} />)}PDF</button>
-                    <button onClick={handleDownloadDocx} disabled={isDownloading} className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 rounded-md text-sm font-medium transition-colors shadow-sm">{isDownloading ? (<div className="animate-spin h-4 w-4 border-2 border-white rounded-full border-t-transparent"></div>) : (<FileDown size={16} />)}Docx</button>
-                    
-                    {/* LoA Buttons */}
-                    <div className="flex items-center bg-emerald-700/50 rounded-md p-0.5 ml-2 border border-emerald-500/50">
-                        <button onClick={handleDownloadLoA} disabled={isDownloading} className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1 rounded text-sm font-medium transition-colors shadow-sm mr-0.5" title="Download LoA PDF">
-                             {isDownloading ? (<div className="animate-spin h-4 w-4 border-2 border-white rounded-full border-t-transparent"></div>) : (<FileSignature size={16} />)} LoA
+                    <div className="flex bg-white/20 rounded-md p-0.5 mr-2">
+                        <button 
+                            onClick={() => setPreviewTab('manuscript')} 
+                            className={`flex items-center gap-2 px-3 py-1.5 rounded text-sm font-medium transition-colors ${previewTab === 'manuscript' ? 'bg-white text-[#0083B0] shadow-sm' : 'text-white hover:bg-white/10'}`}
+                        >
+                            <Layout size={16} /> Manuscript
                         </button>
-                        <button onClick={handleEmailLoA} disabled={isSendingEmail} className="flex items-center gap-1.5 bg-sky-600 hover:bg-sky-500 text-white px-3 py-1 rounded text-sm font-medium transition-colors shadow-sm" title="Send LoA via Email">
-                             {isSendingEmail ? <div className="animate-spin h-3 w-3 border-2 border-white rounded-full border-t-transparent"></div> : <Mail size={16} />} Email
+                        <button 
+                            onClick={() => setPreviewTab('loa')} 
+                            className={`flex items-center gap-2 px-3 py-1.5 rounded text-sm font-medium transition-colors ${previewTab === 'loa' ? 'bg-white text-[#0083B0] shadow-sm' : 'text-white hover:bg-white/10'}`}
+                        >
+                            <FileSignature size={16} /> LoA
                         </button>
                     </div>
+
+                    {previewTab === 'manuscript' ? (
+                        <>
+                            <button onClick={() => setIsEditingPreview(!isEditingPreview)} className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors shadow-sm ${isEditingPreview ? "bg-yellow-400 text-yellow-900 hover:bg-yellow-300" : "bg-white/20 hover:bg-white/30 text-white backdrop-blur-sm"}`}>{isEditingPreview ? <Check size={16} /> : <Edit size={16} />}{isEditingPreview ? "Done Editing" : "Edit"}</button>
+                            <button onClick={() => setAppState(AppState.METADATA_REVIEW)} className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm bg-white/20 hover:bg-white/30 text-white transition-colors backdrop-blur-sm"><ChevronLeft size={16} />Meta</button>
+                            <button onClick={handleDownloadPDF} disabled={isDownloading} className="flex items-center gap-2 bg-rose-600 hover:bg-rose-500 text-white px-4 py-1.5 rounded-md text-sm font-medium transition-colors shadow-sm">{isDownloading ? (<div className="animate-spin h-4 w-4 border-2 border-white rounded-full border-t-transparent"></div>) : (<Save size={16} />)}PDF</button>
+                            <button onClick={handleDownloadDocx} disabled={isDownloading} className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 rounded-md text-sm font-medium transition-colors shadow-sm">{isDownloading ? (<div className="animate-spin h-4 w-4 border-2 border-white rounded-full border-t-transparent"></div>) : (<FileDown size={16} />)}Docx</button>
+                        </>
+                    ) : (
+                        <div className="flex items-center bg-emerald-700/50 rounded-md p-0.5 ml-2 border border-emerald-500/50">
+                            <button onClick={handleDownloadLoA} disabled={isDownloading} className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1 rounded text-sm font-medium transition-colors shadow-sm mr-0.5" title="Download LoA PDF">
+                                {isDownloading ? (<div className="animate-spin h-4 w-4 border-2 border-white rounded-full border-t-transparent"></div>) : (<FileSignature size={16} />)} PDF
+                            </button>
+                            <button onClick={handleEmailLoA} disabled={isSendingEmail} className="flex items-center gap-1.5 bg-sky-600 hover:bg-sky-500 text-white px-3 py-1 rounded text-sm font-medium transition-colors shadow-sm" title="Send LoA via Email">
+                                {isSendingEmail ? <div className="animate-spin h-3 w-3 border-2 border-white rounded-full border-t-transparent"></div> : <Mail size={16} />} Email
+                            </button>
+                        </div>
+                    )}
 
                     <button onClick={() => setShowEmailSettings(true)} className="bg-white/20 hover:bg-white/30 text-white p-1.5 rounded-md transition-colors ml-1" title="Email Settings">
                         <Settings size={18} />
                     </button>
                     
-                    <button onClick={handlePrint} className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-4 py-1.5 rounded-md text-sm font-medium transition-colors shadow-sm ml-2"><Printer size={16} />Print</button>
+                    {/* Only show Print button for Manuscript for now, or adapt it */}
+                    {previewTab === 'manuscript' && (
+                        <button onClick={handlePrint} className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-4 py-1.5 rounded-md text-sm font-medium transition-colors shadow-sm ml-2"><Printer size={16} />Print</button>
+                    )}
                  </>
              )}
             {appState !== AppState.UPLOAD && appState !== AppState.PROCESSING && (<button onClick={() => { setAppState(AppState.UPLOAD); setManuscriptData(null); setRawText(''); }} className="text-white/80 hover:text-white" title="Start Over"><RefreshCw size={18} /></button>)}
@@ -941,7 +997,32 @@ const App: React.FC = () => {
                         <h3 className="font-bold text-lg flex items-center gap-2"><Settings size={20} className="text-slate-500"/> Email Configuration</h3>
                         <button onClick={() => setShowEmailSettings(false)} className="text-slate-400 hover:text-slate-600"><X size={20}/></button>
                     </div>
-                    <div className="p-6 space-y-4">
+                    
+                    <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+                        {/* Help Section */}
+                        <div className="bg-slate-50 p-4 rounded text-sm mb-4 border border-slate-200">
+                            <h4 className="font-bold mb-2 flex items-center gap-2"><Info size={16} className="text-blue-500"/> How to set up EmailJS:</h4>
+                            <ol className="list-decimal pl-4 space-y-2 text-xs text-slate-700">
+                                <li>
+                                    Go to <a href="https://dashboard.emailjs.com/admin/account" target="_blank" className="text-blue-600 underline font-bold inline-flex items-center gap-0.5">Account &gt; API Keys <ExternalLink size={10} /></a> to find your <b>Public Key</b>.
+                                </li>
+                                <li>
+                                    Go to <b>Email Templates</b> and create a new template. Save it to get the <b>Template ID</b>.
+                                </li>
+                                <li>
+                                    In the template content, use these variables:
+                                    <ul className="list-disc pl-4 mt-1 font-mono text-[10px] text-slate-600 bg-white p-2 rounded border border-slate-200">
+                                        <li>{`{{to_name}}`} - Author Name</li>
+                                        <li>{`{{article_title}}`} - Title</li>
+                                        <li>{`{{to_email}}`} - Author Email</li>
+                                    </ul>
+                                </li>
+                                <li className="text-amber-700 italic">
+                                    Note: Attachments on Free Tier might require specific config. Ensure the recipient email field is mapped to <code>{`{{to_email}}`}</code> in the template settings.
+                                </li>
+                            </ol>
+                        </div>
+
                         <div className="bg-blue-50 text-blue-800 p-3 rounded text-sm mb-4">
                             To enable direct email sending, create a free account at <a href="https://www.emailjs.com/" target="_blank" className="underline font-bold">EmailJS.com</a>.
                         </div>
@@ -1087,117 +1168,40 @@ const App: React.FC = () => {
 
              {/* Preview Content */}
              <div className="flex-1 flex justify-center min-w-0" id="printable-content">
-                <div className="w-full flex justify-center">
-                    <LayoutPreview 
-                        data={manuscriptData} 
-                        isEditable={isEditingPreview}
-                        onUpdateField={handleUpdateField}
-                        onUpdateSection={handleUpdateSection}
-                        onUpdateFigureOrder={handleUpdateFigureOrder}
-                        onRemoveFigure={handleRemoveFigure}
-                    />
-                </div>
+                {previewTab === 'manuscript' ? (
+                    <div className="w-full flex justify-center">
+                        <LayoutPreview 
+                            data={manuscriptData} 
+                            isEditable={isEditingPreview}
+                            onUpdateField={handleUpdateField}
+                            onUpdateSection={handleUpdateSection}
+                            onUpdateFigureOrder={handleUpdateFigureOrder}
+                            onRemoveFigure={handleRemoveFigure}
+                        />
+                    </div>
+                ) : (
+                    <div className="w-full flex justify-center">
+                        <div className="w-full max-w-[210mm] bg-white shadow-2xl min-h-[297mm]">
+                             <LoaTemplate 
+                                data={manuscriptData} 
+                                isEditable={true} 
+                                onUpdate={(field, value) => handleUpdateField(field, value as any)} 
+                            />
+                        </div>
+                    </div>
+                )}
              </div>
           </div>
         )}
 
-        {/* --- HIDDEN LOA TEMPLATE FOR PDF GENERATION --- */}
+        {/* --- HIDDEN LOA TEMPLATE FOR PDF GENERATION --- 
+            This template ensures that regardless of the current view, we have a clean, standard LoA ready for generation.
+            It shares the same `manuscriptData` state, so edits in the visible preview will automatically update this hidden view.
+        */}
         {manuscriptData && (
             <div className="absolute top-[-9999px] left-[-9999px]">
-                {/* 
-                   FIXED DIMENSIONS: A4 is 210mm wide. 
-                   We set specific padding to create margins visually inside the canvas.
-                   We remove w-[210mm] and use inline style to ensure precise canvas capture.
-                */}
-                <div 
-                    id="loa-template" 
-                    style={{ 
-                        width: '210mm', 
-                        minHeight: '297mm', 
-                        padding: '25mm', // Symmetric 25mm margin (approx 1 inch)
-                        backgroundColor: 'white',
-                        margin: '0 auto',
-                        boxSizing: 'border-box'
-                    }}
-                    className="font-serif leading-relaxed text-black relative text-sm" // Base text size reduced to text-sm
-                >
-                    {/* Header */}
-                    <div className="border-b-[3px] border-double border-slate-800 pb-4 mb-6 flex items-center gap-4">
-                         <div className="shrink-0">
-                             <img src={manuscriptData.logoUrl || DEFAULT_LOGO_URL} className="h-20 w-auto object-contain" alt="Logo" />
-                         </div>
-                         <div className="flex-1 text-left">
-                             {/* Reduced font size for Journal Name further as requested */}
-                             <h1 className="text-lg font-bold text-[#005580] uppercase tracking-tight leading-none">Journal of Biomedical Sciences and Health</h1>
-                             <p className="text-xs text-slate-700 font-bold mt-1">Universitas Karya Husada Semarang</p>
-                             <p className="text-xs text-slate-600 leading-tight">Jl. Kompol R Soekanto No. 46, Semarang, Jawa Tengah, Indonesia</p>
-                             <p className="text-[10px] font-bold text-slate-800 mt-1">e-ISSN: 3047-7182 | p-ISSN: 3062-6854 | Email: jbsh@unkaha.ac.id</p>
-                         </div>
-                    </div>
-
-                    {/* Date & Ref */}
-                    <div className="flex justify-between mb-6 text-xs">
-                        <div>
-                             <p>Number: <span className="font-bold">JBSH/{new Date().getFullYear()}/LOA/{Math.floor(Math.random() * 1000).toString().padStart(4, '0')}</span></p>
-                             <p>Date: {manuscriptData.acceptedDate || new Date().toLocaleDateString('en-GB', {day: 'numeric', month: 'long', year: 'numeric'})}</p>
-                        </div>
-                    </div>
-
-                    {/* Recipient */}
-                    <div className="mb-6">
-                        <p className="font-bold text-sm">To:</p>
-                        {/* Reduced Author Name size */}
-                        <p className="font-bold text-base leading-snug">{manuscriptData.authors.map(a => a.name).join(', ')}</p>
-                        <p className="text-slate-600 italic text-xs mt-1">{manuscriptData.authors[0].affiliation}</p>
-                    </div>
-
-                    {/* Title */}
-                    <div className="text-center mb-6">
-                        <h2 className="text-lg font-bold underline mb-1">LETTER OF ACCEPTANCE</h2>
-                    </div>
-
-                    {/* Body */}
-                    <div className="text-justify mb-6 space-y-3 text-sm">
-                        <p>Dear Author(s),</p>
-                        <p>We are pleased to inform you that your manuscript titled:</p>
-                        <div className="bg-slate-50 p-3 border border-slate-200 rounded my-2 italic font-bold text-center text-sm">
-                            "{manuscriptData.title}"
-                        </div>
-                        <p>
-                            Has been <strong>ACCEPTED</strong> for publication in the <strong>Journal of Biomedical Sciences and Health (JBSH)</strong>, 
-                            Volume {manuscriptData.volume}, Issue {manuscriptData.issue}, {manuscriptData.year}.
-                        </p>
-                        <p>
-                            The manuscript has gone through a peer-review process, and our reviewers have recommended it for publication. 
-                            We appreciate your contribution to the biomedical and health sciences community.
-                        </p>
-                    </div>
-
-                    {/* Signature */}
-                    <div className="mt-6 flex justify-end">
-                        <div className="text-center w-64">
-                            <p className="mb-4 text-sm">Sincerely,</p>
-                            {/* QR Code as Signature */}
-                            <img 
-                                src={`https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent("https://ejournal.unkaha.ac.id/index.php/jbsh/about/editorialTeam")}`} 
-                                alt="Signature QR" 
-                                className="mx-auto mb-2 h-20 w-20"
-                            />
-                            <p className="font-bold underline text-sm whitespace-nowrap">Poppy Fransisca Amelia, S.SiT, M.Biomed.</p>
-                            <p className="text-xs">Editor-in-Chief</p>
-                            <p className="text-[10px] text-slate-500">Journal of Biomedical Sciences and Health</p>
-                        </div>
-                    </div>
-                    
-                    {/* Contact Person */}
-                    <div className="mt-4 pt-2 border-t border-slate-200 text-[10px] text-slate-500">
-                        <p><span className="font-bold">Contact Person:</span> Fitra Adi Prayogo, M.Si (+62 838-3853-5153)</p>
-                    </div>
-
-                    {/* Footer */}
-                    <div className="absolute bottom-6 left-0 w-full text-center text-[9px] text-slate-400">
-                        Generated automatically by JBSH Editor Assistant System
-                    </div>
+                <div id="loa-hidden-template" style={{ width: '210mm', minHeight: '297mm' }}>
+                   <LoaTemplate data={manuscriptData} isEditable={false} />
                 </div>
             </div>
         )}
