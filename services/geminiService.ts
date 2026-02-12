@@ -16,7 +16,7 @@ const sectionSchema: Schema = {
   type: Type.OBJECT,
   properties: {
     heading: { type: Type.STRING, description: "The section title (e.g., Introduction, Methods)" },
-    content: { type: Type.STRING, description: "The body text of the section." },
+    content: { type: Type.STRING, description: "The body text of the section. If tables are detected, they MUST be returned as HTML <table> structures." },
   },
   required: ["heading", "content"],
 };
@@ -99,12 +99,9 @@ export const createManualManuscript = (text: string): ManuscriptData => {
 export const parseManuscript = async (text: string): Promise<ManuscriptData> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  // REVERT: Use Flash first (faster, more stable). Fallback to Pro only if needed.
-  // This restores the behavior before the "Strict" update that caused timeouts.
-  const modelsToTry = ["gemini-3-flash-preview", "gemini-3-pro-preview"];
+  // Prioritize Pro for quality, fallback to Flash
+  const modelsToTry = ["gemini-3-pro-preview", "gemini-3-flash-preview"];
 
-  // REVERT: Relaxed prompt. Removed "VERBATIM" strictness.
-  // This allows the model to process large text without hitting token limits/timeouts as easily.
   const prompt = `
     You are an AI Assistant for the Journal of Biomedical Sciences and Health (JBSH).
     Convert the raw manuscript text below into a structured JSON object.
@@ -115,7 +112,8 @@ export const parseManuscript = async (text: string): Promise<ManuscriptData> => 
     3. Fix obvious formatting issues (like line breaks in the middle of sentences).
     4. Remove page numbers or running headers.
     5. FORMULAS: If you encounter mathematical formulas or equations, keep them on their own separate line to ensure clear formatting.
-    6. Ensure the Output is Valid JSON.
+    6. TABLES: If you detect data presented in rows and columns (either in text format or existing HTML tables), convert them into standard HTML <table> structures. Use <thead> for headers and <tbody> for the body. Ensure the table structure is clean.
+    7. Ensure the Output is Valid JSON.
 
     Input Text:
     ${text}
@@ -174,7 +172,8 @@ export const parseManuscript = async (text: string): Promise<ManuscriptData> => 
         console.warn(`Attempt ${attempt} with ${modelName} failed:`, error);
         lastError = error;
         
-        if (error.message?.includes("503") || error.message?.includes("429")) {
+        // Handle 503 (Server Overload) or 429 (Quota)
+        if (error.message?.includes("503") || error.message?.includes("429") || error.message?.includes("RESOURCE_EXHAUSTED")) {
           await sleep(2000); 
           continue;
         }
@@ -182,6 +181,6 @@ export const parseManuscript = async (text: string): Promise<ManuscriptData> => 
       }
     }
   }
-
-  throw new Error(`Failed to process manuscript. Please try pasting smaller sections or use Manual Mode.`);
+  
+  throw new Error(lastError?.message || "AI processing failed. Please use Manual Mode.");
 };

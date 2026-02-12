@@ -89,21 +89,21 @@
         background-color: white;
       }
 
-      /* --- SCOPUS Q1 TABLE STYLES --- */
+      /* --- SCOPUS Q1 / APA TABLE STYLES --- */
       /* Applied to all tables inside the manuscript body */
       .manuscript-content table {
         width: 100%;
         border-collapse: collapse;
         margin: 1.5rem 0;
         font-family: 'Roboto', sans-serif; /* Tables often use sans-serif for clarity */
-        font-size: 8.5pt;
+        font-size: 8pt;
         page-break-inside: avoid;
         border-top: 2px solid #000; /* Scopus: Thick top border */
         border-bottom: 2px solid #000; /* Scopus: Thick bottom border */
       }
       
-      .manuscript-content th {
-        border-bottom: 1px solid #000; /* Scopus: Thin separator under header */
+      .manuscript-content thead tr th {
+        border-bottom: 1px solid #000; /* Scopus: Header separator */
         text-align: left;
         padding: 6px 4px;
         font-weight: bold;
@@ -111,14 +111,15 @@
         background-color: transparent;
       }
       
-      .manuscript-content td {
+      .manuscript-content tbody tr td {
         padding: 6px 4px;
         vertical-align: top;
-        border: none; /* Scopus: No vertical borders inside */
+        border: none; /* Scopus: No vertical borders */
+        border-bottom: 1px solid #f0f0f0; /* Very light subtle guide line, often removed in strict APA but helps readability */
       }
       
-      /* Ensure inner rows don't have borders unless explicitly needed, standard Scopus tables are clean */
-      .manuscript-content tr td {
+      /* Ensure last row doesn't have the light border */
+      .manuscript-content tbody tr:last-child td {
         border-bottom: none;
       }
 
@@ -147,6 +148,7 @@
       
       /* Reset indent for tables and figures inside body */
       .manuscript-content table p, 
+      .manuscript-content table td,
       .manuscript-content .figure-container p,
       .manuscript-content .figure-container {
           text-indent: 0 !important;

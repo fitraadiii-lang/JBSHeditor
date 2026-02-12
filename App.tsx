@@ -600,6 +600,49 @@ const App: React.FC = () => {
       return hasMathChars && !isFigureOrTable && !t.endsWith('.'); 
   };
 
+  // Convert HTML Table to Docx Table (Scopus Q1 Style)
+  const htmlTableToDocxTable = (tableElement: HTMLTableElement): Table => {
+      const rows = Array.from(tableElement.rows).map((row, rowIndex) => {
+          const cells = Array.from(row.cells).map(cell => {
+               const isHeader = cell.tagName === 'TH' || row.parentElement?.tagName === 'THEAD';
+               return new TableCell({
+                   children: [new Paragraph({
+                       children: [new TextRun({
+                           text: cell.textContent?.trim() || "",
+                           bold: isHeader,
+                           font: "Arial",
+                           size: 16 // 8pt
+                       })],
+                       alignment: AlignmentType.LEFT
+                   })],
+                   verticalAlign: VerticalAlign.TOP,
+                   borders: {
+                       top: { style: BorderStyle.NONE, size: 0, color: "auto" },
+                       bottom: { style: BorderStyle.NONE, size: 0, color: "auto" },
+                       left: { style: BorderStyle.NONE, size: 0, color: "auto" },
+                       right: { style: BorderStyle.NONE, size: 0, color: "auto" },
+                   },
+                   margins: { top: 100, bottom: 100, left: 100, right: 100 }
+               });
+          });
+          return new TableRow({ children: cells });
+      });
+
+      // Apply Scopus Borders (Top/Bottom of Table)
+      return new Table({
+          rows: rows,
+          width: { size: 100, type: WidthType.PERCENTAGE },
+          borders: {
+              top: { style: BorderStyle.SINGLE, size: 12 }, // Thick top
+              bottom: { style: BorderStyle.SINGLE, size: 12 }, // Thick bottom
+              left: { style: BorderStyle.NONE },
+              right: { style: BorderStyle.NONE },
+              insideVertical: { style: BorderStyle.NONE },
+              insideHorizontal: { style: BorderStyle.SINGLE, size: 2, color: "EEEEEE" } // Light separator
+          }
+      });
+  };
+
   const handleDownloadDocx = async () => {
     if (!manuscriptData) return;
     setIsDownloading(true);
@@ -690,33 +733,68 @@ const App: React.FC = () => {
         const placedFigures = new Set<string>();
         for (const section of manuscriptData.sections) {
             bodyChildren.push(new Paragraph({ children: [new TextRun({ text: section.heading, bold: true, color: "000000", font: "Arial", size: 22 })], heading: HeadingLevel.HEADING_1, spacing: { before: 200, after: 100 }, indent: { firstLine: 0 } }));
-            const paragraphs = stripHtmlToText(section.content).split(/\n\n+/);
-            for (const paraText of paragraphs) {
-                if (!paraText.trim()) continue;
-                const isMainHeading = paraText.length < 100 && (/^\d+\.\s+[A-Z]/.test(paraText.trim()) || /^[A-Z\s\W]+$/.test(paraText.trim()));
-                const isSubHeading = paraText.length < 100 && /^\d+(\.\d+)+/.test(paraText.trim());
-                const isHeading = isMainHeading || isSubHeading;
-                const isFormula = isEquation(paraText);
-                const indentValue = (isHeading || isFormula) ? 0 : 567;
+            
+            // --- UPDATED LOGIC: PARSE HTML CONTENT TO SUPPORT TABLES ---
+            const parser = new DOMParser();
+            // Wrap in a div to ensure a root element
+            const xmlDoc = parser.parseFromString(`<div>${section.content}</div>`, "text/html");
+            const childNodes = Array.from(xmlDoc.body.firstChild?.childNodes || []);
 
-                bodyChildren.push(new Paragraph({ children: [new TextRun({ text: paraText, font: isFormula ? "Cambria Math" : "Georgia", size: 21, bold: isHeading, italics: isFormula })], alignment: isFormula ? AlignmentType.CENTER : AlignmentType.JUSTIFIED, spacing: { after: 200 }, indent: { firstLine: indentValue } }));
+            let textBuffer = "";
 
-                const regex = /(?:Figure|Fig\.?)\s*(\d+)/gi;
-                let match;
-                while ((match = regex.exec(paraText)) !== null) {
-                    const figId = match[1];
-                    if (!placedFigures.has(figId)) {
-                        const fig = manuscriptData.figures.find(f => f.id === figId);
-                        if (fig) {
-                             placedFigures.add(figId);
-                             let figRun: any = new TextRun(`[Image: ${fig.caption}]`);
-                             try { const { data: buf } = await getImageBuffer(fig.fileUrl); figRun = new ImageRun({ data: new Uint8Array(buf), transformation: { width: 300, height: 300 } } as any); } catch(e) { console.error(e) }
-                             bodyChildren.push(new Paragraph({ children: [figRun], alignment: AlignmentType.CENTER, spacing: { before: 100 } }));
-                             bodyChildren.push(new Paragraph({ children: [ new TextRun({ text: `Figure ${fig.id}: `, bold: true, color: journalBlue, font: "Arial", size: 18 }), new TextRun({ text: fig.caption, font: "Arial", size: 18 }) ], alignment: AlignmentType.CENTER, spacing: { before: 50, after: 300 } }));
+            const processTextBuffer = async () => {
+                if (!textBuffer.trim()) return;
+                const paragraphs = stripHtmlToText(textBuffer).split(/\n\n+/);
+                for (const paraText of paragraphs) {
+                    if (!paraText.trim()) continue;
+                    const isMainHeading = paraText.length < 100 && (/^\d+\.\s+[A-Z]/.test(paraText.trim()) || /^[A-Z\s\W]+$/.test(paraText.trim()));
+                    const isSubHeading = paraText.length < 100 && /^\d+(\.\d+)+/.test(paraText.trim());
+                    const isHeading = isMainHeading || isSubHeading;
+                    const isFormula = isEquation(paraText);
+                    const indentValue = (isHeading || isFormula) ? 0 : 567;
+
+                    bodyChildren.push(new Paragraph({ children: [new TextRun({ text: paraText, font: isFormula ? "Cambria Math" : "Georgia", size: 21, bold: isHeading, italics: isFormula })], alignment: isFormula ? AlignmentType.CENTER : AlignmentType.JUSTIFIED, spacing: { after: 200 }, indent: { firstLine: indentValue } }));
+
+                    // Figure Logic
+                    const regex = /(?:Figure|Fig\.?)\s*(\d+)/gi;
+                    let match;
+                    while ((match = regex.exec(paraText)) !== null) {
+                        const figId = match[1];
+                        if (!placedFigures.has(figId)) {
+                            const fig = manuscriptData.figures.find(f => f.id === figId);
+                            if (fig) {
+                                placedFigures.add(figId);
+                                let figRun: any = new TextRun(`[Image: ${fig.caption}]`);
+                                try { const { data: buf } = await getImageBuffer(fig.fileUrl); figRun = new ImageRun({ data: new Uint8Array(buf), transformation: { width: 300, height: 300 } } as any); } catch(e) { console.error(e) }
+                                bodyChildren.push(new Paragraph({ children: [figRun], alignment: AlignmentType.CENTER, spacing: { before: 100 } }));
+                                bodyChildren.push(new Paragraph({ children: [ new TextRun({ text: `Figure ${fig.id}: `, bold: true, color: journalBlue, font: "Arial", size: 18 }), new TextRun({ text: fig.caption, font: "Arial", size: 18 }) ], alignment: AlignmentType.CENTER, spacing: { before: 50, after: 300 } }));
+                            }
                         }
                     }
                 }
+                textBuffer = "";
+            };
+
+            for (const node of childNodes) {
+                 if (node.nodeName === 'TABLE') {
+                     // Process existing text before table
+                     await processTextBuffer();
+                     // Convert Table
+                     const table = htmlTableToDocxTable(node as HTMLTableElement);
+                     bodyChildren.push(table);
+                     bodyChildren.push(new Paragraph({text: ""})); // Spacer after table
+                 } else {
+                     // Accumulate text/html for processing
+                     if (node.nodeType === 3) { // Text node
+                         textBuffer += node.textContent || "";
+                     } else if (node.nodeType === 1) { // Element node (P, DIV, etc)
+                         // Getting outerHTML ensures we keep structure like <br> which stripHtmlToText handles
+                         textBuffer += (node as Element).outerHTML;
+                     }
+                 }
             }
+            // Process any remaining text
+            await processTextBuffer();
         }
 
         const remainingFigures = manuscriptData.figures.filter(f => !placedFigures.has(f.id));
@@ -737,7 +815,7 @@ const App: React.FC = () => {
 
         const runningHeadLeft = manuscriptData.authors.length > 2 ? `${manuscriptData.authors[0].name.split(' ').pop()} et al.` : manuscriptData.authors.map(a => a.name.split(' ').pop()).join(' & ');
         const runningHeadRight = `J. Biomed. Sci. Health. ${manuscriptData.year}; ${manuscriptData.volume}(${manuscriptData.issue}): ${manuscriptData.pages}`;
-        const runningHeaderTable = new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, borders: { top: { style: BorderStyle.NONE }, bottom: { style: BorderStyle.SINGLE, size: 4, color: "000000" }, left: { style: BorderStyle.NONE }, right: { style: BorderStyle.NONE }, insideVertical: { style: BorderStyle.NONE }, insideHorizontal: { style: BorderStyle.NONE }, }, rows: [ new TableRow({ children: [ new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: runningHeadLeft, italics: true, font: "Arial", size: 16 })], alignment: AlignmentType.LEFT })] }), new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: runningHeadRight, font: "Arial", size: 16 })], alignment: AlignmentType.RIGHT })] }) ] }) ] });
+        const runningHeaderTable = new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, borders: { top: { style: BorderStyle.NONE }, bottom: { style: BorderStyle.NONE }, left: { style: BorderStyle.NONE }, right: { style: BorderStyle.NONE }, insideVertical: { style: BorderStyle.NONE }, insideHorizontal: { style: BorderStyle.NONE }, }, rows: [ new TableRow({ children: [ new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: runningHeadLeft, italics: true, font: "Arial", size: 16 })], alignment: AlignmentType.LEFT })] }), new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: runningHeadRight, font: "Arial", size: 16 })], alignment: AlignmentType.RIGHT })] }) ] }) ] });
         const headerDefault = new Header({ children: [runningHeaderTable, new Paragraph({text: "", spacing: {after: 200}})] });
 
         const doc = new Document({
@@ -755,7 +833,7 @@ const App: React.FC = () => {
 
   const handleUpdateField = <K extends keyof ManuscriptData>(field: K, value: ManuscriptData[K]) => { if (!manuscriptData) return; setManuscriptData({ ...manuscriptData, [field]: value }); };
   const handleUpdateSection = (index: number, newContent: string) => { if (!manuscriptData) return; const newSections = [...manuscriptData.sections]; newSections[index].content = newContent; setManuscriptData({ ...manuscriptData, sections: newSections }); };
-  const handleUpdateFigureOrder = (index: number, direction: 'up' | 'down') => { if (!manuscriptData) return; const newFigures = [...manuscriptData.figures]; if (direction === 'up' && index > 0) { [newFigures[index - 1], newFigures[index]] = [newFigures[index], newFigures[index - 1]]; } else if (direction === 'down' && index < newFigures.length - 1) { [newFigures[index + 1], newFigures[index]] = [newFigures[index], newFigures[index + 1]]; } setManuscriptData({...manuscriptData, figures: newFigures}); }
+  const handleUpdateFigureOrder = (index: number, direction: 'up' | 'down') => { if (!manuscriptData) return; const newFigures = [...manuscriptData.figures]; if (direction === 'up' && index > 0) { [newFigures[index - 1], newFigures[index]] = [newFigures[index], newFigures[index - 1]]; } else if (direction === 'down' && index < newFigures.length - 1) { [newFigures[index + 1], newFigures[index]] = [newFigures[index], newFigures[index - 1]]; } setManuscriptData({...manuscriptData, figures: newFigures}); }
   const handleLogoUpload = (event: React.ChangeEvent<HTMLInputElement>) => { const file = event.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = (e) => { if (manuscriptData) { setManuscriptData({ ...manuscriptData, logoUrl: e.target?.result as string }); } }; reader.readAsDataURL(file); };
   const handleAddFigure = (event: React.ChangeEvent<HTMLInputElement>) => { const file = event.target.files?.[0]; if (!file || !manuscriptData) return; const reader = new FileReader(); reader.onload = (e) => { const newFigure: ManuscriptFigure = { id: (manuscriptData.figures.length + 1).toString(), fileUrl: e.target?.result as string, caption: newFigCaption || `Figure ${manuscriptData.figures.length + 1}` }; setManuscriptData({ ...manuscriptData, figures: [...manuscriptData.figures, newFigure] }); setNewFigCaption(""); }; reader.readAsDataURL(file); };
   const handleRemoveFigure = (id: string) => { if (!manuscriptData) return; setManuscriptData({ ...manuscriptData, figures: manuscriptData.figures.filter(f => f.id !== id) }); };
