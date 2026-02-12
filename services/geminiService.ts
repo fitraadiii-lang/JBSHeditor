@@ -99,8 +99,8 @@ export const createManualManuscript = (text: string): ManuscriptData => {
 export const parseManuscript = async (text: string): Promise<ManuscriptData> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  // Prioritize Pro for quality, fallback to Flash
-  const modelsToTry = ["gemini-3-pro-preview", "gemini-3-flash-preview"];
+  // Use Gemini 3 Flash as requested by user ("diganti gemini flash saja")
+  const modelsToTry = ["gemini-3-flash-preview"];
 
   const prompt = `
     You are an AI Assistant for the Journal of Biomedical Sciences and Health (JBSH).
@@ -134,37 +134,44 @@ export const parseManuscript = async (text: string): Promise<ManuscriptData> => 
             responseMimeType: "application/json",
             responseSchema: manuscriptSchema,
             temperature: 0.1, // Slight flexibility helps with completion
+            maxOutputTokens: 8192, // High limit to prevent "unterminated string" on long manuscripts
           },
         });
 
         if (response.text) {
           let cleanText = response.text.replace(/```json/g, '').replace(/```/g, '').trim();
-          const parsed = JSON.parse(cleanText) as ManuscriptData;
           
-          if (!parsed.title || !parsed.sections) throw new Error("Incomplete data structure.");
+          try {
+              const parsed = JSON.parse(cleanText) as ManuscriptData;
+              
+              if (!parsed.title || !parsed.sections) throw new Error("Incomplete data structure.");
 
-          const vol = "3";
-          const issue = "1";
-          const year = new Date().getFullYear().toString();
-          const acceptedDate = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+              const vol = "3";
+              const issue = "1";
+              const year = new Date().getFullYear().toString();
+              const acceptedDate = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 
-          return {
-            ...parsed,
-            doi: "10.xxxxx/jbsh.vX.iX.xxxx",
-            volume: vol,
-            issue: issue,
-            year: year,
-            pages: "1-12",
-            receivedDate: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }),
-            acceptedDate: acceptedDate,
-            publishedDate: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }),
-            figures: [],
-            logoUrl: "https://raw.githubusercontent.com/stackblitz/stackblitz-images/main/jbsh-logo-placeholder.png",
-            // LoA Defaults
-            loaNumber: `JBSH/${year}/LOA/${Math.floor(Math.random() * 1000).toString().padStart(4, '0')}`,
-            loaDate: acceptedDate,
-            loaBody: generateLoaBody(parsed.title, vol, issue, year) 
-          };
+              return {
+                ...parsed,
+                doi: "10.xxxxx/jbsh.vX.iX.xxxx",
+                volume: vol,
+                issue: issue,
+                year: year,
+                pages: "1-12",
+                receivedDate: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }),
+                acceptedDate: acceptedDate,
+                publishedDate: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }),
+                figures: [],
+                logoUrl: "https://raw.githubusercontent.com/stackblitz/stackblitz-images/main/jbsh-logo-placeholder.png",
+                // LoA Defaults
+                loaNumber: `JBSH/${year}/LOA/${Math.floor(Math.random() * 1000).toString().padStart(4, '0')}`,
+                loaDate: acceptedDate,
+                loaBody: generateLoaBody(parsed.title, vol, issue, year) 
+              };
+          } catch (parseError) {
+              console.error("JSON Parse Error:", parseError);
+              throw new Error("The manuscript is too long for the AI to process in one step (Output Truncated). Please try a shorter version or use Manual Mode.");
+          }
         }
         throw new Error("Empty response");
 
@@ -177,6 +184,12 @@ export const parseManuscript = async (text: string): Promise<ManuscriptData> => 
           await sleep(2000); 
           continue;
         }
+
+        // If it's explicitly our truncation error, stop retrying this model/content combo as it will likely fail again
+        if (error.message.includes("too long")) {
+            throw error;
+        }
+
         break; // Break on other errors to try next model
       }
     }
