@@ -3,10 +3,11 @@ import { createRoot } from 'react-dom/client';
 import { ManuscriptData, AppState, ManuscriptFigure } from './types';
 import { parseManuscript, createManualManuscript } from './services/geminiService';
 import { LayoutPreview } from './components/LayoutPreview';
-import { Upload, FileText, Printer, ChevronLeft, RefreshCw, AlertCircle, ArrowRight, Image as ImageIcon, Plus, Trash2, FileDown, Edit, Check, Save, LogIn, User, LogOut, Home, FileSearch, Info, AlertTriangle, CheckCircle, SearchX, ZapOff } from 'lucide-react';
+import { Upload, FileText, Printer, ChevronLeft, RefreshCw, AlertCircle, ArrowRight, Image as ImageIcon, Plus, Trash2, FileDown, Edit, Check, Save, LogIn, User, LogOut, Home, FileSearch, Info, AlertTriangle, CheckCircle, SearchX, ZapOff, FileSignature, Mail, Settings, X, Send } from 'lucide-react';
 import mammoth from 'mammoth';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, ImageRun, SectionType, BorderStyle, Table, TableRow, TableCell, WidthType, ShadingType, Header, Footer, PageNumber, VerticalAlign } from "docx";
 import FileSaver from "file-saver";
+import emailjs from '@emailjs/browser';
 
 // Default JBSH Logo from user request
 const DEFAULT_LOGO_URL = "https://i.ibb.co.com/84Q0yL5/jbsh-logo.jpg";
@@ -36,6 +37,12 @@ interface ValidationStats {
     formattingIssues: string[]; // Writing errors/formatting issues
 }
 
+interface EmailConfig {
+    serviceId: string;
+    templateId: string;
+    publicKey: string;
+}
+
 const App: React.FC = () => {
   // Start at LOGIN state
   const [appState, setAppState] = useState<AppState>(AppState.LOGIN);
@@ -43,8 +50,17 @@ const App: React.FC = () => {
   const [rawText, setRawText] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [isEditingPreview, setIsEditingPreview] = useState(false);
   const [validationStats, setValidationStats] = useState<ValidationStats | null>(null);
+  const [showEmailSettings, setShowEmailSettings] = useState(false);
+  
+  // Email Config State (Persisted in localStorage for convenience)
+  const [emailConfig, setEmailConfig] = useState<EmailConfig>({
+      serviceId: localStorage.getItem('jbsh_email_service_id') || '',
+      templateId: localStorage.getItem('jbsh_email_template_id') || '',
+      publicKey: localStorage.getItem('jbsh_email_public_key') || ''
+  });
 
   // Auth State
   const [loginEmail, setLoginEmail] = useState("");
@@ -61,6 +77,14 @@ const App: React.FC = () => {
       /\w\S*/g,
       text => text.charAt(0).toUpperCase() + text.substring(1).toLowerCase()
     );
+  };
+
+  const saveEmailConfig = () => {
+      localStorage.setItem('jbsh_email_service_id', emailConfig.serviceId);
+      localStorage.setItem('jbsh_email_template_id', emailConfig.templateId);
+      localStorage.setItem('jbsh_email_public_key', emailConfig.publicKey);
+      setShowEmailSettings(false);
+      alert("Email configuration saved!");
   };
 
   // --- AUTH HANDLERS ---
@@ -356,6 +380,140 @@ const App: React.FC = () => {
       }
   };
 
+  const getLoAPDFBlob = async (): Promise<Blob | null> => {
+      const element = document.getElementById('loa-template');
+      if (!element || !window.html2pdf) return null;
+
+      // Ensure margin fixes are applied during capture
+      const opt = {
+        margin: 0, 
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { 
+            scale: 2, 
+            useCORS: true,
+            letterRendering: true,
+            scrollX: 0,
+            scrollY: 0,
+            windowWidth: 794 // Force A4 Width in pixels
+        },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+      };
+
+      try {
+          const pdfObject = await window.html2pdf().set(opt).from(element).toPdf().get('pdf');
+          const pdfBlob = pdfObject.output('blob');
+          return pdfBlob;
+      } catch (e) {
+          console.error("PDF generation error:", e);
+          return null;
+      }
+  };
+
+  const handleDownloadLoA = () => {
+      if (!manuscriptData) return;
+      setIsDownloading(true);
+
+      const element = document.getElementById('loa-template');
+      
+      const opt = {
+        margin: 0, 
+        filename: `LoA_JBSH_${manuscriptData.authors[0]?.name.split(' ').pop()}.pdf`,
+        image: { type: 'jpeg', quality: 1 },
+        html2canvas: { 
+            scale: 2, 
+            useCORS: true,
+            letterRendering: true,
+            scrollX: 0,
+            scrollY: 0,
+            windowWidth: 794 // 210mm @ 96 DPI
+        },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+      };
+
+      if (window.html2pdf) {
+        window.html2pdf().set(opt).from(element).save().then(() => {
+            setIsDownloading(false);
+        });
+      } else {
+          alert("PDF generator library not loaded correctly.");
+          setIsDownloading(false);
+      }
+  };
+
+  const handleEmailLoA = async () => {
+    if (!manuscriptData) return;
+    
+    // Check if EmailJS is configured
+    if (!emailConfig.serviceId || !emailConfig.publicKey || !emailConfig.templateId) {
+        // Fallback to Mailto with instructions
+        const confirmSetup = window.confirm(
+            "EmailJS is not configured. To send emails automatically with attachments, you need to set up the keys in Settings.\n\nDo you want to use the default email client (manual attachment) instead?"
+        );
+        
+        if (confirmSetup) {
+             // 1. Download File
+             handleDownloadLoA();
+
+             // 2. Open Mailto
+            const authorName = manuscriptData.authors[0].name;
+            const authorEmail = manuscriptData.authors.find(a => a.email)?.email || ""; 
+            const subject = `Letter of Acceptance - ${manuscriptData.title}`;
+            const body = `Dear ${authorName},\n\nWe are pleased to inform you that your manuscript titled "${manuscriptData.title}" has been ACCEPTED for publication in JBSH.\n\nPlease find the attached Letter of Acceptance.\n\nSincerely,\nJBSH Editor`;
+            
+            setTimeout(() => {
+                window.location.href = `mailto:${authorEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+            }, 1000);
+        } else {
+            setShowEmailSettings(true);
+        }
+        return;
+    }
+
+    setIsSendingEmail(true);
+
+    try {
+        // 1. Generate PDF Blob
+        const pdfBlob = await getLoAPDFBlob();
+        if (!pdfBlob) throw new Error("Failed to generate PDF");
+
+        // 2. Convert to Base64 (Data URI)
+        const reader = new FileReader();
+        reader.readAsDataURL(pdfBlob);
+        reader.onloadend = async () => {
+            const base64data = reader.result as string; 
+            
+            // 3. Prepare Template Params (Must match your EmailJS Template)
+            const templateParams = {
+                to_email: manuscriptData.authors.find(a => a.email)?.email || "",
+                to_name: manuscriptData.authors[0].name,
+                article_title: manuscriptData.title,
+                loa_attachment: base64data // Requires template to have an attachment field mapped to this
+            };
+
+            // 4. Send via EmailJS
+            try {
+                await emailjs.send(
+                    emailConfig.serviceId, 
+                    emailConfig.templateId, 
+                    templateParams, 
+                    emailConfig.publicKey
+                );
+                alert(`Email sent successfully to ${templateParams.to_email}!`);
+            } catch (err: any) {
+                console.error("EmailJS Error:", err);
+                alert("Failed to send email. Check your settings or file size limits.\n\nError: " + JSON.stringify(err));
+            } finally {
+                setIsSendingEmail(false);
+            }
+        };
+
+    } catch (e) {
+        console.error("Sending failed", e);
+        alert("An error occurred while preparing the email.");
+        setIsSendingEmail(false);
+    }
+  };
+
   const getImageBuffer = async (url: string): Promise<{ data: ArrayBuffer }> => {
       try {
           const response = await fetch(url);
@@ -379,40 +537,29 @@ const App: React.FC = () => {
     return text.trim();
   };
 
-  // Helper function to bold abstract keywords in DOCX
   const parseAbstractToTextRuns = (abstractText: string): TextRun[] => {
       if (!abstractText) return [];
-      
-      // Keywords to look for
       const keywords = ["Background", "Methods", "Method", "Results", "Result", "Conclusions", "Conclusion", "Purpose", "Objectives", "Objective"];
-      // Regex matches keyword followed by optional colon/period. Capture the keyword+sep in group 1.
       const regex = new RegExp(`(${keywords.join("|")})[:.]?`, "gi");
-      
       const parts = abstractText.split(regex);
       const textRuns: TextRun[] = [];
-
       parts.forEach((part) => {
           if (!part) return;
-          // Check if this part matches one of our keywords (case insensitive check)
           const isKeyword = keywords.some(k => part.toLowerCase().includes(k.toLowerCase()));
-          
           textRuns.push(new TextRun({
               text: part,
               font: "Georgia",
-              size: 20, // 10pt
-              bold: isKeyword // Bold if it matches
+              size: 20,
+              bold: isKeyword
           }));
       });
-
       return textRuns;
   };
 
-  // Helper to identify potential formulas
   const isEquation = (text: string): boolean => {
       const t = text.trim();
-      if (t.length > 150) return false; // Too long
+      if (t.length > 150) return false;
       if (t.length < 2) return false;
-      // Heuristic: Contains equals sign or approximations, and doesn't look like a normal sentence start
       const hasMathChars = /[=≈≠≤≥±×÷]/.test(t);
       const isFigureOrTable = /^(Figure|Table)/i.test(t);
       return hasMathChars && !isFigureOrTable && !t.endsWith('.'); 
@@ -421,12 +568,10 @@ const App: React.FC = () => {
   const handleDownloadDocx = async () => {
     if (!manuscriptData) return;
     setIsDownloading(true);
-
     try {
         const frontMatterChildren = [];
         const bodyChildren = [];
         const journalBlue = "005580";
-
         const uniqueAffiliations = Array.from(new Set(manuscriptData.authors.map(a => a.affiliation)));
         const getAffiliationIndex = (aff: string) => uniqueAffiliations.indexOf(aff) + 1;
 
@@ -435,50 +580,24 @@ const App: React.FC = () => {
             try {
                 const { data: logoBuffer } = await getImageBuffer(manuscriptData.logoUrl);
                 logoImageRun = new Paragraph({
-                    children: [
-                        new ImageRun({
-                            data: new Uint8Array(logoBuffer),
-                            transformation: { width: 76, height: 76 }
-                        } as any)
-                    ]
+                    children: [new ImageRun({ data: new Uint8Array(logoBuffer), transformation: { width: 76, height: 76 } } as any)]
                 });
-            } catch (e) {
-                console.warn("Could not embed logo in DOCX", e);
-                logoImageRun = new Paragraph("[LOGO]");
-            }
+            } catch (e) { logoImageRun = new Paragraph("[LOGO]"); }
         }
 
         const headerTable = new Table({
             width: { size: 100, type: WidthType.PERCENTAGE },
-            borders: {
-                top: { style: BorderStyle.NONE }, bottom: { style: BorderStyle.NONE }, left: { style: BorderStyle.NONE }, right: { style: BorderStyle.NONE }, insideVertical: { style: BorderStyle.NONE }, insideHorizontal: { style: BorderStyle.NONE },
-            },
+            borders: { top: { style: BorderStyle.NONE }, bottom: { style: BorderStyle.NONE }, left: { style: BorderStyle.NONE }, right: { style: BorderStyle.NONE }, insideVertical: { style: BorderStyle.NONE }, insideHorizontal: { style: BorderStyle.NONE }, },
             rows: [
                 new TableRow({
                     children: [
-                        new TableCell({
-                            width: { size: 14, type: WidthType.PERCENTAGE }, 
-                            children: [logoImageRun], 
-                            verticalAlign: VerticalAlign.CENTER
-                        }),
+                        new TableCell({ width: { size: 14, type: WidthType.PERCENTAGE }, children: [logoImageRun], verticalAlign: VerticalAlign.CENTER }),
                         new TableCell({
                             width: { size: 86, type: WidthType.PERCENTAGE }, 
                             children: [
-                                new Paragraph({
-                                    children: [new TextRun({ text: "Journal of Biomedical Sciences and Health", bold: true, size: 32, color: journalBlue, font: "Georgia" })],
-                                    alignment: AlignmentType.RIGHT,
-                                }),
-                                new Paragraph({
-                                    children: [new TextRun({ text: "e-ISSN: 3047-7182 | p-ISSN: 3062-6854", font: "Arial", size: 18 })],
-                                    alignment: AlignmentType.RIGHT,
-                                }),
-                                new Paragraph({
-                                    children: [
-                                        new TextRun({ text: "Available online at ", font: "Arial", size: 18 }),
-                                        new TextRun({ text: "ejournal.unkaha.ac.id/index.php/jbsh", color: journalBlue, underline: {}, font: "Arial", size: 18 })
-                                    ],
-                                    alignment: AlignmentType.RIGHT,
-                                }),
+                                new Paragraph({ children: [new TextRun({ text: "Journal of Biomedical Sciences and Health", bold: true, size: 32, color: journalBlue, font: "Georgia" })], alignment: AlignmentType.RIGHT }),
+                                new Paragraph({ children: [new TextRun({ text: "e-ISSN: 3047-7182 | p-ISSN: 3062-6854", font: "Arial", size: 18 })], alignment: AlignmentType.RIGHT }),
+                                new Paragraph({ children: [new TextRun({ text: "Available online at ", font: "Arial", size: 18 }), new TextRun({ text: "ejournal.unkaha.ac.id/index.php/jbsh", color: journalBlue, underline: {}, font: "Arial", size: 18 })], alignment: AlignmentType.RIGHT }),
                             ],
                         }),
                     ],
@@ -489,39 +608,13 @@ const App: React.FC = () => {
 
         const openAccessTable = new Table({
             width: { size: 100, type: WidthType.PERCENTAGE }, 
-            rows: [
-                new TableRow({
-                    children: [
-                        new TableCell({
-                            children: [
-                                new Paragraph({ 
-                                    children: [new TextRun({ text: "OPEN ACCESS", color: "FFFFFF", bold: true, size: 26, font: "Arial" })], 
-                                    alignment: AlignmentType.RIGHT, 
-                                    spacing: { before: 80, after: 80 } 
-                                })
-                            ],
-                            shading: { fill: journalBlue, type: ShadingType.CLEAR },
-                            margins: { top: 60, bottom: 60, right: 200 }, 
-                        })
-                    ]
-                })
-            ],
+            rows: [ new TableRow({ children: [ new TableCell({ children: [ new Paragraph({ children: [new TextRun({ text: "OPEN ACCESS", color: "FFFFFF", bold: true, size: 26, font: "Arial" })], alignment: AlignmentType.RIGHT, spacing: { before: 80, after: 80 } }) ], shading: { fill: journalBlue, type: ShadingType.CLEAR }, margins: { top: 60, bottom: 60, right: 200 }, }) ] }) ],
             borders: { top: { style: BorderStyle.NONE }, bottom: { style: BorderStyle.NONE }, left: { style: BorderStyle.NONE }, right: { style: BorderStyle.NONE }, insideVertical: { style: BorderStyle.NONE }, insideHorizontal: { style: BorderStyle.NONE } }
         });
-        frontMatterChildren.push(new Paragraph({ text: "", spacing: { after: 100 } })); 
-        frontMatterChildren.push(openAccessTable);
-        frontMatterChildren.push(new Paragraph({ text: "", spacing: { after: 100 } })); 
+        frontMatterChildren.push(new Paragraph({ text: "", spacing: { after: 100 } })); frontMatterChildren.push(openAccessTable); frontMatterChildren.push(new Paragraph({ text: "", spacing: { after: 100 } })); 
 
         frontMatterChildren.push(
-            new Paragraph({
-                children: [
-                    new TextRun({ text: `Vol. ${manuscriptData.volume}, No. ${manuscriptData.issue}, ${manuscriptData.year}         DOI: `, font: "Georgia", size: 18 }),
-                    new TextRun({ text: manuscriptData.doi || "doi.xxx", color: journalBlue, font: "Georgia", size: 18 }),
-                    new TextRun({ text: `         Pages ${manuscriptData.pages}`, font: "Georgia", size: 18 })
-                ],
-                border: { bottom: { style: BorderStyle.THICK, size: 12, space: 4 } },
-                spacing: { after: 200 }
-            })
+            new Paragraph({ children: [ new TextRun({ text: `Vol. ${manuscriptData.volume}, No. ${manuscriptData.issue}, ${manuscriptData.year}         DOI: `, font: "Georgia", size: 18 }), new TextRun({ text: manuscriptData.doi || "doi.xxx", color: journalBlue, font: "Georgia", size: 18 }), new TextRun({ text: `         Pages ${manuscriptData.pages}`, font: "Georgia", size: 18 }) ], border: { bottom: { style: BorderStyle.THICK, size: 12, space: 4 } }, spacing: { after: 200 } })
         );
 
         frontMatterChildren.push(
@@ -535,130 +628,43 @@ const App: React.FC = () => {
             authorsParagraph.addChildElement(new TextRun({ text: cleanName, bold: true, size: 22, font: "Georgia" }));
             const affIdx = getAffiliationIndex(a.affiliation);
             authorsParagraph.addChildElement(new TextRun({ text: `${affIdx}${a.email ? '*' : ''}`, superScript: true, size: 18, font: "Georgia" }));
-            if(i < manuscriptData.authors.length - 1) {
-                authorsParagraph.addChildElement(new TextRun({ text: ", ", bold: true, size: 22, font: "Georgia" }));
-            }
+            if(i < manuscriptData.authors.length - 1) { authorsParagraph.addChildElement(new TextRun({ text: ", ", bold: true, size: 22, font: "Georgia" })); }
         });
         frontMatterChildren.push(authorsParagraph);
 
-        uniqueAffiliations.forEach((aff, i) => {
-             frontMatterChildren.push(
-                new Paragraph({
-                    children: [
-                         new TextRun({ text: `${i+1} `, superScript: true, size: 16 }),
-                         new TextRun({ text: aff, italics: true, size: 18, font: "Georgia" })
-                    ],
-                    alignment: AlignmentType.CENTER,
-                })
-            );
-        });
+        uniqueAffiliations.forEach((aff, i) => { frontMatterChildren.push( new Paragraph({ children: [ new TextRun({ text: `${i+1} `, superScript: true, size: 16 }), new TextRun({ text: aff, italics: true, size: 18, font: "Georgia" }) ], alignment: AlignmentType.CENTER, }) ); });
         const corresp = manuscriptData.authors.find(a => a.email);
-        if(corresp) {
-            frontMatterChildren.push(
-                new Paragraph({
-                    children: [new TextRun({ text: `*Correspondence: ${corresp.email}`, size: 16, font: "Arial" })],
-                    alignment: AlignmentType.CENTER,
-                    spacing: { before: 100, after: 400 }
-                })
-            );
-        } else {
-             frontMatterChildren.push(new Paragraph({ text: "", spacing: { after: 400 } }));
-        }
+        if(corresp) { frontMatterChildren.push( new Paragraph({ children: [new TextRun({ text: `*Correspondence: ${corresp.email}`, size: 16, font: "Arial" })], alignment: AlignmentType.CENTER, spacing: { before: 100, after: 400 } }) ); } else { frontMatterChildren.push(new Paragraph({ text: "", spacing: { after: 400 } })); }
 
         const abstractTable = new Table({
             width: { size: 100, type: WidthType.PERCENTAGE },
-            borders: { top: { style: BorderStyle.SINGLE, size: 18, color: journalBlue }, bottom: { style: BorderStyle.SINGLE, size: 6, color: journalBlue }, right: { style: BorderStyle.SINGLE, size: 4, color: "CCCCCC" }, left: { style: BorderStyle.SINGLE, size: 4, color: "CCCCCC" }, insideVertical: { style: BorderStyle.NONE }, insideHorizontal: { style: BorderStyle.NONE },
-            },
-            rows: [
-                new TableRow({
-                    children: [
-                        new TableCell({
-                            shading: { fill: "F9FAFB", type: ShadingType.CLEAR },
-                            children: [
-                                new Paragraph({ children: [new TextRun({ text: "ABSTRACT", bold: true, color: journalBlue, font: "Arial", size: 20 })], alignment: AlignmentType.CENTER, spacing: { before: 100, after: 200 } }),
-                                // UPDATED: Use parseAbstractToTextRuns instead of raw string to support bold keywords
-                                new Paragraph({ 
-                                    children: parseAbstractToTextRuns(manuscriptData.abstract), 
-                                    alignment: AlignmentType.JUSTIFIED, 
-                                    spacing: { after: 200 } 
-                                }),
-                                new Paragraph({ 
-                                    children: [new TextRun({ text: "Keywords: ", bold: true, font: "Georgia", size: 20 }), new TextRun({ text: manuscriptData.keywords.join("; "), font: "Georgia", size: 20 })], 
-                                    spacing: { after: 100 },
-                                    alignment: AlignmentType.JUSTIFIED 
-                                })
-                            ],
-                            margins: { top: 200, bottom: 200, left: 200, right: 200 } 
-                        })
-                    ]
-                })
-            ]
+            borders: { top: { style: BorderStyle.SINGLE, size: 18, color: journalBlue }, bottom: { style: BorderStyle.SINGLE, size: 6, color: journalBlue }, right: { style: BorderStyle.SINGLE, size: 4, color: "CCCCCC" }, left: { style: BorderStyle.SINGLE, size: 4, color: "CCCCCC" }, insideVertical: { style: BorderStyle.NONE }, insideHorizontal: { style: BorderStyle.NONE }, },
+            rows: [ new TableRow({ children: [ new TableCell({ shading: { fill: "F9FAFB", type: ShadingType.CLEAR }, children: [ new Paragraph({ children: [new TextRun({ text: "ABSTRACT", bold: true, color: journalBlue, font: "Arial", size: 20 })], alignment: AlignmentType.CENTER, spacing: { before: 100, after: 200 } }), new Paragraph({ children: parseAbstractToTextRuns(manuscriptData.abstract), alignment: AlignmentType.JUSTIFIED, spacing: { after: 200 } }), new Paragraph({ children: [new TextRun({ text: "Keywords: ", bold: true, font: "Georgia", size: 20 }), new TextRun({ text: manuscriptData.keywords.join("; "), font: "Georgia", size: 20 })], spacing: { after: 100 }, alignment: AlignmentType.JUSTIFIED }) ], margins: { top: 200, bottom: 200, left: 200, right: 200 } }) ] }) ]
         });
-        frontMatterChildren.push(abstractTable);
-        frontMatterChildren.push(new Paragraph({ text: "", spacing: { after: 200 } }));
+        frontMatterChildren.push(abstractTable); frontMatterChildren.push(new Paragraph({ text: "", spacing: { after: 200 } }));
 
         frontMatterChildren.push(new Paragraph({ children: [new TextRun({ text: "Received: ", bold: true, color: journalBlue, font: "Arial", size: 16 }), new TextRun({ text: `${manuscriptData.receivedDate} | `, font: "Arial", size: 16 }), new TextRun({ text: "Accepted: ", bold: true, color: journalBlue, font: "Arial", size: 16 }), new TextRun({ text: `${manuscriptData.acceptedDate} | `, font: "Arial", size: 16 }), new TextRun({ text: "Published: ", bold: true, color: journalBlue, font: "Arial", size: 16 }), new TextRun({ text: `${manuscriptData.publishedDate}`, font: "Arial", size: 16 })], alignment: AlignmentType.CENTER, border: { top: { style: BorderStyle.SINGLE, size: 4, space: 1, color: "DDDDDD" } }, spacing: { before: 200, after: 200 } }));
         const citationAuthors = manuscriptData.authors.length > 2 ? `${manuscriptData.authors[0].name} et al.` : manuscriptData.authors.map(a => a.name).join(' & ');
         const citationTable = new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, borders: { top: { style: BorderStyle.NONE }, bottom: { style: BorderStyle.NONE }, right: { style: BorderStyle.NONE }, left: { style: BorderStyle.SINGLE, size: 24, color: journalBlue }, insideVertical: { style: BorderStyle.NONE }, insideHorizontal: { style: BorderStyle.NONE }, }, rows: [ new TableRow({ children: [ new TableCell({ shading: { fill: "F0F9FF", type: ShadingType.CLEAR }, children: [ new Paragraph({ children: [ new TextRun({ text: "Cite this article: ", bold: true, color: journalBlue, font: "Arial", size: 16 }), new TextRun({ text: `${citationAuthors} (${manuscriptData.year}). ${manuscriptData.title}. `, font: "Georgia", size: 16 }), new TextRun({ text: "Journal of Biomedical Sciences and Health", italics: true, font: "Georgia", size: 16 }), new TextRun({ text: `, ${manuscriptData.volume}(${manuscriptData.issue}), ${manuscriptData.pages}. https://doi.org/${manuscriptData.doi}`, font: "Georgia", size: 16 }) ], alignment: AlignmentType.JUSTIFIED }) ], margins: { left: 100, right: 100, top: 100, bottom: 100 } }) ] }) ] });
-        frontMatterChildren.push(citationTable);
-        frontMatterChildren.push(new Paragraph({ text: "", spacing: { after: 200 } }));
+        frontMatterChildren.push(citationTable); frontMatterChildren.push(new Paragraph({ text: "", spacing: { after: 200 } }));
         
-        let unlockIconRun: any = new Paragraph(""); 
-        try { 
-            const { data: unlockBuffer } = await getImageBuffer(UNLOCK_ICON_URL); 
-            unlockIconRun = new ImageRun({ 
-                data: new Uint8Array(unlockBuffer), 
-                transformation: { width: 15, height: 15 }
-            } as any); 
-        } catch(e) { console.warn("Unlock icon fetch failed", e); }
-        
+        let unlockIconRun: any = new Paragraph(""); try { const { data: unlockBuffer } = await getImageBuffer(UNLOCK_ICON_URL); unlockIconRun = new ImageRun({ data: new Uint8Array(unlockBuffer), transformation: { width: 15, height: 15 } } as any); } catch(e) { console.warn("Unlock icon fetch failed", e); }
         const openAccessBoxTable = new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, borders: { top: { style: BorderStyle.SINGLE, color: "CCCCCC", size: 2 }, bottom: { style: BorderStyle.SINGLE, color: "CCCCCC", size: 2 }, left: { style: BorderStyle.SINGLE, color: "CCCCCC", size: 2 }, right: { style: BorderStyle.SINGLE, color: "CCCCCC", size: 2 }, insideVertical: { style: BorderStyle.NONE } }, rows: [ new TableRow({ children: [ new TableCell({ width: { size: 5, type: WidthType.PERCENTAGE }, children: [ new Paragraph({ children: [unlockIconRun], alignment: AlignmentType.CENTER }) ], verticalAlign: VerticalAlign.CENTER, shading: { fill: "F3F4F6", type: ShadingType.CLEAR } }), new TableCell({ width: { size: 95, type: WidthType.PERCENTAGE }, children: [ new Paragraph({ children: [ new TextRun({ text: "Open Access. ", bold: true, color: journalBlue, font: "Arial", size: 16 }), new TextRun({ text: "This article is an open access article distributed under the terms and conditions of the Creative Commons Attribution 4.0 International License (CC BY 4.0).", font: "Arial", size: 16 }) ], alignment: AlignmentType.JUSTIFIED }) ], margins: { top: 100, bottom: 100, left: 100, right: 100 }, verticalAlign: VerticalAlign.CENTER }) ] }) ] });
-        frontMatterChildren.push(openAccessBoxTable);
-        frontMatterChildren.push(new Paragraph({ text: "", spacing: { after: 400 } }));
+        frontMatterChildren.push(openAccessBoxTable); frontMatterChildren.push(new Paragraph({ text: "", spacing: { after: 400 } }));
 
         const placedFigures = new Set<string>();
-
         for (const section of manuscriptData.sections) {
-            bodyChildren.push(new Paragraph({ 
-                children: [new TextRun({ text: section.heading, bold: true, color: "000000", font: "Arial", size: 22 })], 
-                heading: HeadingLevel.HEADING_1, 
-                spacing: { before: 200, after: 100 },
-                indent: { firstLine: 0 } 
-            }));
-            
+            bodyChildren.push(new Paragraph({ children: [new TextRun({ text: section.heading, bold: true, color: "000000", font: "Arial", size: 22 })], heading: HeadingLevel.HEADING_1, spacing: { before: 200, after: 100 }, indent: { firstLine: 0 } }));
             const paragraphs = stripHtmlToText(section.content).split(/\n\n+/);
-            
             for (const paraText of paragraphs) {
                 if (!paraText.trim()) continue;
-
-                // Identify if it's a MAIN heading (1. Introduction, or CAPS)
                 const isMainHeading = paraText.length < 100 && (/^\d+\.\s+[A-Z]/.test(paraText.trim()) || /^[A-Z\s\W]+$/.test(paraText.trim()));
-                
-                // Identify if it's a SUB heading (2.1. Analysis, 3.2.1. Method)
                 const isSubHeading = paraText.length < 100 && /^\d+(\.\d+)+/.test(paraText.trim());
-
                 const isHeading = isMainHeading || isSubHeading;
-
-                // Identify if it's a Formula/Equation
                 const isFormula = isEquation(paraText);
-                
-                // Determine Indentation
-                // Headings, Formulas, and Figures = 0 indent
-                // Regular Text = 1cm (approx 567 twips) indent
                 const indentValue = (isHeading || isFormula) ? 0 : 567;
 
-                bodyChildren.push(new Paragraph({ 
-                    children: [new TextRun({ 
-                        text: paraText, 
-                        font: isFormula ? "Cambria Math" : "Georgia", 
-                        size: 21, 
-                        bold: isHeading, // Bold for both main and sub headings
-                        italics: isFormula // Scopus style: Italics for math
-                    })], 
-                    alignment: isFormula ? AlignmentType.CENTER : AlignmentType.JUSTIFIED, 
-                    spacing: { after: 200 },
-                    indent: { firstLine: indentValue } 
-                }));
+                bodyChildren.push(new Paragraph({ children: [new TextRun({ text: paraText, font: isFormula ? "Cambria Math" : "Georgia", size: 21, bold: isHeading, italics: isFormula })], alignment: isFormula ? AlignmentType.CENTER : AlignmentType.JUSTIFIED, spacing: { after: 200 }, indent: { firstLine: indentValue } }));
 
                 const regex = /(?:Figure|Fig\.?)\s*(\d+)/gi;
                 let match;
@@ -668,16 +674,8 @@ const App: React.FC = () => {
                         const fig = manuscriptData.figures.find(f => f.id === figId);
                         if (fig) {
                              placedFigures.add(figId);
-                             
                              let figRun: any = new TextRun(`[Image: ${fig.caption}]`);
-                             try {
-                                  const { data: buf } = await getImageBuffer(fig.fileUrl);
-                                  figRun = new ImageRun({ 
-                                      data: new Uint8Array(buf), 
-                                      transformation: { width: 300, height: 300 }
-                                  } as any);
-                             } catch(e) { console.error(e) }
-                             
+                             try { const { data: buf } = await getImageBuffer(fig.fileUrl); figRun = new ImageRun({ data: new Uint8Array(buf), transformation: { width: 300, height: 300 } } as any); } catch(e) { console.error(e) }
                              bodyChildren.push(new Paragraph({ children: [figRun], alignment: AlignmentType.CENTER, spacing: { before: 100 } }));
                              bodyChildren.push(new Paragraph({ children: [ new TextRun({ text: `Figure ${fig.id}: `, bold: true, color: journalBlue, font: "Arial", size: 18 }), new TextRun({ text: fig.caption, font: "Arial", size: 18 }) ], alignment: AlignmentType.CENTER, spacing: { before: 50, after: 300 } }));
                         }
@@ -691,72 +689,33 @@ const App: React.FC = () => {
             bodyChildren.push(new Paragraph({ children: [new TextRun({ text: "ADDITIONAL FIGURES", bold: true, font: "Arial", size: 22 })], spacing: { before: 400, after: 200 } }));
             for (const fig of remainingFigures) {
                 let figRun: any = new TextRun(`[Image: ${fig.caption}]`);
-                try {
-                     const { data: buf } = await getImageBuffer(fig.fileUrl);
-                     figRun = new ImageRun({ 
-                         data: new Uint8Array(buf), 
-                         transformation: { width: 300, height: 300 }
-                     } as any);
-                } catch(e) { console.error(e) }
+                try { const { data: buf } = await getImageBuffer(fig.fileUrl); figRun = new ImageRun({ data: new Uint8Array(buf), transformation: { width: 300, height: 300 } } as any); } catch(e) { console.error(e) }
                 bodyChildren.push( new Paragraph({ children: [figRun], alignment: AlignmentType.CENTER, spacing: { before: 100 } }), new Paragraph({ children: [ new TextRun({ text: `Figure ${fig.id}: `, bold: true, color: journalBlue, font: "Arial", size: 18 }), new TextRun({ text: fig.caption, font: "Arial", size: 18 }) ], alignment: AlignmentType.CENTER, spacing: { before: 50, after: 300 } }) );
             }
         }
 
         bodyChildren.push( new Paragraph({ children: [new TextRun({ text: "REFERENCES", bold: true, font: "Arial", size: 22 })], heading: HeadingLevel.HEADING_1, spacing: { before: 400, after: 200 }, border: { top: { style: BorderStyle.SINGLE, size: 6 } } }) );
-        manuscriptData.references.forEach((ref) => {
-             bodyChildren.push( new Paragraph({ 
-                 children: [new TextRun({ text: ref, font: "Georgia", size: 18 })], 
-                 alignment: AlignmentType.JUSTIFIED, 
-                 spacing: { after: 100 },
-                 indent: { left: 567, hanging: 567 } 
-            }) );
-        });
+        manuscriptData.references.forEach((ref) => { bodyChildren.push( new Paragraph({ children: [new TextRun({ text: ref, font: "Georgia", size: 18 })], alignment: AlignmentType.JUSTIFIED, spacing: { after: 100 }, indent: { left: 567, hanging: 567 } }) ); });
 
         const footerPage1 = new Footer({ children: [ new Paragraph({ children: [] }) ] });
-        const footerDefault = new Footer({
-            children: [
-                new Paragraph({ children: [new TextRun({ text: "Journal of Biomedical Sciences and Health", bold: true, font: "Arial", size: 16 })], alignment: AlignmentType.CENTER, border: { top: { style: BorderStyle.SINGLE, size: 6, space: 4 } }, spacing: { before: 100 } }),
-                new Paragraph({ children: [new TextRun({ text: `Copyright © ${manuscriptData.year} The Author(s). Published by Universitas Karya Husada Semarang, Indonesia`, font: "Arial", size: 16 })], alignment: AlignmentType.CENTER }),
-                new Paragraph({ children: [new TextRun({ children: [PageNumber.CURRENT], bold: true, size: 20, font: "Arial" })], alignment: AlignmentType.CENTER, spacing: { before: 100 } })
-            ]
-        });
+        const footerDefault = new Footer({ children: [ new Paragraph({ children: [new TextRun({ text: "Journal of Biomedical Sciences and Health", bold: true, font: "Arial", size: 16 })], alignment: AlignmentType.CENTER, border: { top: { style: BorderStyle.SINGLE, size: 6, space: 4 } }, spacing: { before: 100 } }), new Paragraph({ children: [new TextRun({ text: `Copyright © ${manuscriptData.year} The Author(s). Published by Universitas Karya Husada Semarang, Indonesia`, font: "Arial", size: 16 })], alignment: AlignmentType.CENTER }), new Paragraph({ children: [new TextRun({ children: [PageNumber.CURRENT], bold: true, size: 20, font: "Arial" })], alignment: AlignmentType.CENTER, spacing: { before: 100 } }) ] });
 
         const runningHeadLeft = manuscriptData.authors.length > 2 ? `${manuscriptData.authors[0].name.split(' ').pop()} et al.` : manuscriptData.authors.map(a => a.name.split(' ').pop()).join(' & ');
         const runningHeadRight = `J. Biomed. Sci. Health. ${manuscriptData.year}; ${manuscriptData.volume}(${manuscriptData.issue}): ${manuscriptData.pages}`;
-        const runningHeaderTable = new Table({
-             width: { size: 100, type: WidthType.PERCENTAGE },
-             borders: { top: { style: BorderStyle.NONE }, bottom: { style: BorderStyle.SINGLE, size: 4, color: "000000" }, left: { style: BorderStyle.NONE }, right: { style: BorderStyle.NONE }, insideVertical: { style: BorderStyle.NONE }, insideHorizontal: { style: BorderStyle.NONE },
-             },
-             rows: [ new TableRow({ children: [ new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: runningHeadLeft, italics: true, font: "Arial", size: 16 })], alignment: AlignmentType.LEFT })] }), new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: runningHeadRight, font: "Arial", size: 16 })], alignment: AlignmentType.RIGHT })] }) ] }) ]
-        });
+        const runningHeaderTable = new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, borders: { top: { style: BorderStyle.NONE }, bottom: { style: BorderStyle.SINGLE, size: 4, color: "000000" }, left: { style: BorderStyle.NONE }, right: { style: BorderStyle.NONE }, insideVertical: { style: BorderStyle.NONE }, insideHorizontal: { style: BorderStyle.NONE }, }, rows: [ new TableRow({ children: [ new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: runningHeadLeft, italics: true, font: "Arial", size: 16 })], alignment: AlignmentType.LEFT })] }), new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: runningHeadRight, font: "Arial", size: 16 })], alignment: AlignmentType.RIGHT })] }) ] }) ] });
         const headerDefault = new Header({ children: [runningHeaderTable, new Paragraph({text: "", spacing: {after: 200}})] });
 
         const doc = new Document({
             sections: [
-                {
-                    properties: { type: SectionType.NEXT_PAGE, page: { margin: { top: "2.5cm", bottom: "2.5cm", left: "2.5cm", right: "2.5cm" } } },
-                    children: frontMatterChildren,
-                    headers: { default: new Header({ children: [] }) },
-                    footers: { default: footerPage1 }
-                },
-                {
-                    properties: { column: { count: 2, space: 400 }, type: SectionType.CONTINUOUS },
-                    children: bodyChildren,
-                    headers: { default: headerDefault },
-                    footers: { default: footerDefault }
-                }
+                { properties: { type: SectionType.NEXT_PAGE, page: { margin: { top: "2.5cm", bottom: "2.5cm", left: "2.5cm", right: "2.5cm" } } }, children: frontMatterChildren, headers: { default: new Header({ children: [] }) }, footers: { default: footerPage1 } },
+                { properties: { column: { count: 2, space: 400 }, type: SectionType.CONTINUOUS }, children: bodyChildren, headers: { default: headerDefault }, footers: { default: footerDefault } }
             ]
         });
 
         const blob = await Packer.toBlob(doc);
         FileSaver.saveAs(blob, "JBSH_Manuscript.docx");
 
-    } catch (err) {
-        console.error("Docx generation failed", err);
-        alert("Failed to generate DOCX file. Please check console for details.");
-    } finally {
-        setIsDownloading(false);
-    }
+    } catch (err) { console.error("Docx generation failed", err); alert("Failed to generate DOCX file. Please check console for details."); } finally { setIsDownloading(false); }
   };
 
   const handleUpdateField = <K extends keyof ManuscriptData>(field: K, value: ManuscriptData[K]) => { if (!manuscriptData) return; setManuscriptData({ ...manuscriptData, [field]: value }); };
@@ -941,7 +900,22 @@ const App: React.FC = () => {
                     <button onClick={() => setAppState(AppState.METADATA_REVIEW)} className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm bg-white/20 hover:bg-white/30 text-white transition-colors backdrop-blur-sm"><ChevronLeft size={16} />Metadata</button>
                     <button onClick={handleDownloadPDF} disabled={isDownloading} className="flex items-center gap-2 bg-rose-600 hover:bg-rose-500 text-white px-4 py-1.5 rounded-md text-sm font-medium transition-colors shadow-sm">{isDownloading ? (<div className="animate-spin h-4 w-4 border-2 border-white rounded-full border-t-transparent"></div>) : (<Save size={16} />)}PDF</button>
                     <button onClick={handleDownloadDocx} disabled={isDownloading} className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 rounded-md text-sm font-medium transition-colors shadow-sm">{isDownloading ? (<div className="animate-spin h-4 w-4 border-2 border-white rounded-full border-t-transparent"></div>) : (<FileDown size={16} />)}Docx</button>
-                    <button onClick={handlePrint} className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-4 py-1.5 rounded-md text-sm font-medium transition-colors shadow-sm"><Printer size={16} />Print</button>
+                    
+                    {/* LoA Buttons */}
+                    <div className="flex items-center bg-emerald-700/50 rounded-md p-0.5 ml-2 border border-emerald-500/50">
+                        <button onClick={handleDownloadLoA} disabled={isDownloading} className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1 rounded text-sm font-medium transition-colors shadow-sm mr-0.5" title="Download LoA PDF">
+                             {isDownloading ? (<div className="animate-spin h-4 w-4 border-2 border-white rounded-full border-t-transparent"></div>) : (<FileSignature size={16} />)} LoA
+                        </button>
+                        <button onClick={handleEmailLoA} disabled={isSendingEmail} className="flex items-center gap-1.5 bg-sky-600 hover:bg-sky-500 text-white px-3 py-1 rounded text-sm font-medium transition-colors shadow-sm" title="Send LoA via Email">
+                             {isSendingEmail ? <div className="animate-spin h-3 w-3 border-2 border-white rounded-full border-t-transparent"></div> : <Mail size={16} />} Email
+                        </button>
+                    </div>
+
+                    <button onClick={() => setShowEmailSettings(true)} className="bg-white/20 hover:bg-white/30 text-white p-1.5 rounded-md transition-colors ml-1" title="Email Settings">
+                        <Settings size={18} />
+                    </button>
+                    
+                    <button onClick={handlePrint} className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-4 py-1.5 rounded-md text-sm font-medium transition-colors shadow-sm ml-2"><Printer size={16} />Print</button>
                  </>
              )}
             {appState !== AppState.UPLOAD && appState !== AppState.PROCESSING && (<button onClick={() => { setAppState(AppState.UPLOAD); setManuscriptData(null); setRawText(''); }} className="text-white/80 hover:text-white" title="Start Over"><RefreshCw size={18} /></button>)}
@@ -959,6 +933,39 @@ const App: React.FC = () => {
       </nav>
 
       <main className="flex-grow p-4 md:p-8">
+        {/* Email Settings Modal */}
+        {showEmailSettings && (
+            <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+                <div className="bg-white rounded-xl shadow-2xl w-full max-w-md animate-in zoom-in-95 duration-200">
+                    <div className="flex justify-between items-center p-4 border-b">
+                        <h3 className="font-bold text-lg flex items-center gap-2"><Settings size={20} className="text-slate-500"/> Email Configuration</h3>
+                        <button onClick={() => setShowEmailSettings(false)} className="text-slate-400 hover:text-slate-600"><X size={20}/></button>
+                    </div>
+                    <div className="p-6 space-y-4">
+                        <div className="bg-blue-50 text-blue-800 p-3 rounded text-sm mb-4">
+                            To enable direct email sending, create a free account at <a href="https://www.emailjs.com/" target="_blank" className="underline font-bold">EmailJS.com</a>.
+                        </div>
+                        <div>
+                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Service ID</label>
+                            <input type="text" value={emailConfig.serviceId} onChange={e => setEmailConfig({...emailConfig, serviceId: e.target.value})} className="w-full border p-2 rounded text-sm" placeholder="service_xxxxx" />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Template ID</label>
+                            <input type="text" value={emailConfig.templateId} onChange={e => setEmailConfig({...emailConfig, templateId: e.target.value})} className="w-full border p-2 rounded text-sm" placeholder="template_xxxxx" />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Public Key</label>
+                            <input type="text" value={emailConfig.publicKey} onChange={e => setEmailConfig({...emailConfig, publicKey: e.target.value})} className="w-full border p-2 rounded text-sm" placeholder="Public Key (User ID)" />
+                        </div>
+                    </div>
+                    <div className="p-4 border-t bg-slate-50 flex justify-end gap-2 rounded-b-xl">
+                        <button onClick={() => setShowEmailSettings(false)} className="px-4 py-2 text-slate-600 text-sm hover:bg-slate-200 rounded">Cancel</button>
+                        <button onClick={saveEmailConfig} className="px-4 py-2 bg-[#0083B0] text-white text-sm font-bold rounded hover:bg-[#007299]">Save Config</button>
+                    </div>
+                </div>
+            </div>
+        )}
+
         {appState === AppState.UPLOAD && (
           <div className="max-w-2xl mx-auto mt-10 animate-in fade-in slide-in-from-bottom-8 no-print">
             <div className="bg-white rounded-xl shadow-xl overflow-hidden">
@@ -1092,6 +1099,107 @@ const App: React.FC = () => {
                 </div>
              </div>
           </div>
+        )}
+
+        {/* --- HIDDEN LOA TEMPLATE FOR PDF GENERATION --- */}
+        {manuscriptData && (
+            <div className="absolute top-[-9999px] left-[-9999px]">
+                {/* 
+                   FIXED DIMENSIONS: A4 is 210mm wide. 
+                   We set specific padding to create margins visually inside the canvas.
+                   We remove w-[210mm] and use inline style to ensure precise canvas capture.
+                */}
+                <div 
+                    id="loa-template" 
+                    style={{ 
+                        width: '210mm', 
+                        minHeight: '297mm', 
+                        padding: '25mm', // Symmetric 25mm margin (approx 1 inch)
+                        backgroundColor: 'white',
+                        margin: '0 auto',
+                        boxSizing: 'border-box'
+                    }}
+                    className="font-serif leading-relaxed text-black relative text-sm" // Base text size reduced to text-sm
+                >
+                    {/* Header */}
+                    <div className="border-b-[3px] border-double border-slate-800 pb-4 mb-6 flex items-center gap-4">
+                         <div className="shrink-0">
+                             <img src={manuscriptData.logoUrl || DEFAULT_LOGO_URL} className="h-20 w-auto object-contain" alt="Logo" />
+                         </div>
+                         <div className="flex-1 text-left">
+                             {/* Reduced font size for Journal Name further as requested */}
+                             <h1 className="text-lg font-bold text-[#005580] uppercase tracking-tight leading-none">Journal of Biomedical Sciences and Health</h1>
+                             <p className="text-xs text-slate-700 font-bold mt-1">Universitas Karya Husada Semarang</p>
+                             <p className="text-xs text-slate-600 leading-tight">Jl. Kompol R Soekanto No. 46, Semarang, Jawa Tengah, Indonesia</p>
+                             <p className="text-[10px] font-bold text-slate-800 mt-1">e-ISSN: 3047-7182 | p-ISSN: 3062-6854 | Email: jbsh@unkaha.ac.id</p>
+                         </div>
+                    </div>
+
+                    {/* Date & Ref */}
+                    <div className="flex justify-between mb-6 text-xs">
+                        <div>
+                             <p>Number: <span className="font-bold">JBSH/{new Date().getFullYear()}/LOA/{Math.floor(Math.random() * 1000).toString().padStart(4, '0')}</span></p>
+                             <p>Date: {manuscriptData.acceptedDate || new Date().toLocaleDateString('en-GB', {day: 'numeric', month: 'long', year: 'numeric'})}</p>
+                        </div>
+                    </div>
+
+                    {/* Recipient */}
+                    <div className="mb-6">
+                        <p className="font-bold text-sm">To:</p>
+                        {/* Reduced Author Name size */}
+                        <p className="font-bold text-base leading-snug">{manuscriptData.authors.map(a => a.name).join(', ')}</p>
+                        <p className="text-slate-600 italic text-xs mt-1">{manuscriptData.authors[0].affiliation}</p>
+                    </div>
+
+                    {/* Title */}
+                    <div className="text-center mb-6">
+                        <h2 className="text-lg font-bold underline mb-1">LETTER OF ACCEPTANCE</h2>
+                    </div>
+
+                    {/* Body */}
+                    <div className="text-justify mb-6 space-y-3 text-sm">
+                        <p>Dear Author(s),</p>
+                        <p>We are pleased to inform you that your manuscript titled:</p>
+                        <div className="bg-slate-50 p-3 border border-slate-200 rounded my-2 italic font-bold text-center text-sm">
+                            "{manuscriptData.title}"
+                        </div>
+                        <p>
+                            Has been <strong>ACCEPTED</strong> for publication in the <strong>Journal of Biomedical Sciences and Health (JBSH)</strong>, 
+                            Volume {manuscriptData.volume}, Issue {manuscriptData.issue}, {manuscriptData.year}.
+                        </p>
+                        <p>
+                            The manuscript has gone through a peer-review process, and our reviewers have recommended it for publication. 
+                            We appreciate your contribution to the biomedical and health sciences community.
+                        </p>
+                    </div>
+
+                    {/* Signature */}
+                    <div className="mt-6 flex justify-end">
+                        <div className="text-center w-64">
+                            <p className="mb-4 text-sm">Sincerely,</p>
+                            {/* QR Code as Signature */}
+                            <img 
+                                src={`https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent("https://ejournal.unkaha.ac.id/index.php/jbsh/about/editorialTeam")}`} 
+                                alt="Signature QR" 
+                                className="mx-auto mb-2 h-20 w-20"
+                            />
+                            <p className="font-bold underline text-sm whitespace-nowrap">Poppy Fransisca Amelia, S.SiT, M.Biomed.</p>
+                            <p className="text-xs">Editor-in-Chief</p>
+                            <p className="text-[10px] text-slate-500">Journal of Biomedical Sciences and Health</p>
+                        </div>
+                    </div>
+                    
+                    {/* Contact Person */}
+                    <div className="mt-4 pt-2 border-t border-slate-200 text-[10px] text-slate-500">
+                        <p><span className="font-bold">Contact Person:</span> Fitra Adi Prayogo, M.Si (+62 838-3853-5153)</p>
+                    </div>
+
+                    {/* Footer */}
+                    <div className="absolute bottom-6 left-0 w-full text-center text-[9px] text-slate-400">
+                        Generated automatically by JBSH Editor Assistant System
+                    </div>
+                </div>
+            </div>
         )}
       </main>
     </div>
