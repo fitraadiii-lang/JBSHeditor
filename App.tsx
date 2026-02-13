@@ -693,7 +693,7 @@ const App: React.FC = () => {
                 <Home size={20} />
              </button>
             <div className="bg-white text-[#0083B0] px-2 py-1 rounded font-bold text-xl tracking-tight shadow-sm border border-blue-200">JBSH</div>
-            <h1 className="text-lg font-semibold tracking-wide hidden sm:block">Editor Assistant Tool (Pro)</h1>
+            <h1 className="text-lg font-semibold tracking-wide hidden sm:block">Editor Assistant Tool (Auto-Pilot)</h1>
           </div>
           <div className="flex items-center gap-2">
              {appState === AppState.PREVIEW && (
@@ -764,8 +764,8 @@ const App: React.FC = () => {
             <div className="bg-white rounded-xl shadow-xl overflow-hidden">
                 <div className="bg-gradient-to-r from-[#0083B0] to-[#00B4DB] p-8 text-white text-center">
                     <div className="inline-block bg-white text-[#0083B0] px-4 py-2 rounded-lg font-bold text-4xl tracking-tight shadow-lg border-2 border-white/20 mb-4">JBSH</div>
-                    <h2 className="text-2xl font-bold mb-2">Manuscript Generator (Pro)</h2>
-                    <p className="opacity-90">Processing with Gemini 3 Pro for maximum quality (QC > 95%).</p>
+                    <h2 className="text-2xl font-bold mb-2">Manuscript Generator (Auto-Pilot)</h2>
+                    <p className="opacity-90">Auto-switching between Gemini Flash (Fast) and Pro (Detail) for stability.</p>
                 </div>
                 <div className="p-8">
                     {error && (
@@ -799,7 +799,7 @@ const App: React.FC = () => {
                 <div className="absolute inset-0 border-4 border-slate-200 rounded-full"></div>
                 <div className="absolute inset-0 border-4 border-[#00B4DB] rounded-full border-t-transparent animate-spin"></div>
             </div>
-            <h2 className="text-xl font-bold text-slate-800 mb-2">Analyzing Manuscript...</h2><p className="text-slate-500 max-w-md">Processing with Gemini 3 Pro (High Precision)...</p>
+            <h2 className="text-xl font-bold text-slate-800 mb-2">Analyzing Manuscript...</h2><p className="text-slate-500 max-w-md">Optimizing with Gemini 3 Flash / Pro...</p>
           </div>
         )}
 
