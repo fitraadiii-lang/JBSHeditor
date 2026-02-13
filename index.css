@@ -1,0 +1,155 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom print styles - ROBUST FIX */
+@media print {
+  @page {
+    size: A4;
+    margin: 0;
+  }
+  
+  /* Hide everything by default */
+  body * {
+    visibility: hidden;
+  }
+
+  /* Reset body and html to allow full height printing */
+  html, body {
+    height: auto !important;
+    overflow: visible !important;
+    background-color: white !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Target the printable content wrapper */
+  #printable-content, #printable-content * {
+    visibility: visible;
+  }
+
+  /* Position the printable content at the absolute top-left */
+  #printable-content {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100% !important;
+    max-width: 210mm !important; /* Force A4 width constraint */
+    margin: 0 auto !important;
+    padding: 0 !important;
+    background-color: white !important;
+    box-shadow: none !important;
+    display: block !important;
+  }
+
+  /* Hide UI specific classes explicitly */
+  .no-print {
+    display: none !important;
+  }
+  
+  /* Ensure text colors print correctly */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
+
+.font-serif-journal {
+  font-family: 'Georgia', serif;
+}
+.font-sans-journal {
+  font-family: 'Roboto', sans-serif;
+}
+
+/* Utility to break multi-column layout for images/references */
+.col-span-all {
+  column-span: all;
+  -webkit-column-span: all;
+}
+
+/* Edit mode highlights */
+.editable-highlight {
+  outline: 2px dashed #60a5fa;
+  outline-offset: 4px;
+  background-color: rgba(239, 246, 255, 0.4);
+  border-radius: 4px;
+  cursor: text;
+}
+.editable-highlight:focus {
+  outline: 2px solid #2563eb;
+  background-color: white;
+}
+
+/* --- SCOPUS Q1 / APA TABLE STYLES --- */
+/* Applied to all tables inside the manuscript body */
+.manuscript-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.5rem 0;
+  font-family: 'Roboto', sans-serif; /* Tables often use sans-serif for clarity */
+  font-size: 8pt;
+  page-break-inside: avoid;
+  border-top: 2px solid #000; /* Scopus: Thick top border */
+  border-bottom: 2px solid #000; /* Scopus: Thick bottom border */
+}
+
+.manuscript-content thead tr th {
+  border-bottom: 1px solid #000; /* Scopus: Header separator */
+  text-align: left;
+  padding: 6px 4px;
+  font-weight: bold;
+  vertical-align: bottom;
+  background-color: transparent;
+}
+
+.manuscript-content tbody tr td {
+  padding: 6px 4px;
+  vertical-align: top;
+  border: none; /* Scopus: No vertical borders */
+  border-bottom: 1px solid #f0f0f0; /* Very light subtle guide line, often removed in strict APA but helps readability */
+}
+
+/* Ensure last row doesn't have the light border */
+.manuscript-content tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* --- BODY PARAGRAPH INDENTATION --- */
+.manuscript-content .indent-1cm {
+    text-indent: 1cm;
+    margin-bottom: 0.5em; /* Maintain spacing */
+}
+
+.manuscript-content .text-indent-0 {
+    text-indent: 0 !important;
+}
+
+/* EXCEPTION: Headings (h1-h6) or Bold paragraphs acting as headings should NOT indent */
+.manuscript-content h1, 
+.manuscript-content h2, 
+.manuscript-content h3, 
+.manuscript-content h4,
+.manuscript-content strong {
+    text-indent: 0 !important;
+}
+
+/* Reset indent for tables and figures inside body */
+.manuscript-content table p, 
+.manuscript-content table td,
+.manuscript-content .figure-container p,
+.manuscript-content .figure-container {
+    text-indent: 0 !important;
+}
+
+/* --- APA REFERENCE STYLE --- */
+/* Hanging indent: Ensure positive padding so text doesn't overflow left */
+/* 1cm Indent for references */
+.apa-reference {
+  padding-left: 1cm; /* Space for the hang */
+  text-indent: -1cm; /* Pull first line back */
+  margin-left: 0; 
+  margin-bottom: 0.5em;
+  font-size: 9pt;
+  line-height: 1.4;
+  text-align: justify;
+}
