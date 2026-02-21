@@ -1,278 +1,161 @@
-import { GoogleGenAI, Type, Schema } from "@google/genai";
-import { ManuscriptData } from "../types";
+import { GoogleGenAI, Type } from "@google/genai";
+import { ArticleData, Figure } from "../types";
 
-// Define the schema for the manuscript output
-const authorSchema: Schema = {
-  type: Type.OBJECT,
-  properties: {
-    name: { type: Type.STRING },
-    affiliation: { type: Type.STRING },
-    email: { type: Type.STRING, nullable: true },
-  },
-  required: ["name", "affiliation"],
+const DEFAULT_MODEL = 'gemini-3-flash-preview';
+
+const getAIInstance = (userKey?: string) => {
+  const key = userKey || process.env.API_KEY || '';
+  return new GoogleGenAI({ apiKey: key });
 };
 
-const sectionSchema: Schema = {
-  type: Type.OBJECT,
-  properties: {
-    heading: { type: Type.STRING, description: "The section title (e.g., Introduction, Methods)" },
-    content: { type: Type.STRING, description: "The body text of the section. If tables are detected, they MUST be returned as HTML <table> structures." },
-  },
-  required: ["heading", "content"],
-};
+// Define an interface for the raw Gemini response structure
+interface RawGeminiResponse {
+  title?: string;
+  articleType?: string;
+  doi?: string; 
+  abstract?: string;
+  keywords?: string[];
+  authors?: Array<{
+    name: string;
+    affiliation: string;
+    email?: string;
+    isCorresponding?: boolean;
+  }>;
+  contentSections?: Array<{
+    header: string;
+    body: string;
+  }>;
+}
 
-const manuscriptSchema: Schema = {
-  type: Type.OBJECT,
-  properties: {
-    title: { type: Type.STRING },
-    authors: { type: Type.ARRAY, items: authorSchema },
-    abstract: { type: Type.STRING },
-    keywords: { type: Type.ARRAY, items: { type: Type.STRING } },
-    sections: { type: Type.ARRAY, items: sectionSchema },
-    references: { type: Type.ARRAY, items: { type: Type.STRING } },
-  },
-  required: ["title", "authors", "abstract", "keywords", "sections", "references"],
-};
+export const parseRawManuscript = async (
+  rawText: string, 
+  availableFigures: Figure[] = [], 
+  userKey?: string, 
+  userModel?: string
+): Promise<Partial<ArticleData>> => {
+  const ai = getAIInstance(userKey);
+  const modelName = userModel || DEFAULT_MODEL;
 
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
-
-const generateLoaBody = (title: string, vol: string, issue: string, year: string) => `
-<p>Dear Author(s),</p>
-<p>We are pleased to inform you that your manuscript titled:</p>
-<div style="background-color: #f8fafc; padding: 12px; border: 1px solid #e2e8f0; border-radius: 4px; margin: 12px 0; font-style: italic; font-weight: bold; text-align: center; font-size: 0.9em;">
-    "${title}"
-</div>
-<p>
-    Has been <strong>ACCEPTED</strong> for publication in the <strong>Journal of Biomedical Sciences and Health (JBSH)</strong>, 
-    Volume ${vol}, Issue ${issue}, ${year}.
-</p>
-<p>
-    The manuscript has gone through a peer-review process, and our reviewers have recommended it for publication. 
-    We appreciate your contribution to the biomedical and health sciences community.
-</p>
-`;
-
-// --- JSON REPAIR UTILITY ---
-// This is critical for preventing "unterminated string" errors when the AI output gets cut off.
-const attemptJsonRepair = (jsonStr: string): string => {
-  let repaired = jsonStr.trim();
-  
-  // 1. Fix Unclosed String (count quotes)
-  let quoteCount = 0;
-  let escape = false;
-  for (let i = 0; i < repaired.length; i++) {
-    if (repaired[i] === '\\' && !escape) { escape = true; continue; }
-    if (repaired[i] === '"' && !escape) { quoteCount++; }
-    escape = false;
-  }
-  
-  if (quoteCount % 2 !== 0) {
-      repaired += '"'; // Close the open string
-  }
-
-  // 2. Fix Unbalanced Braces/Brackets
-  const stack: string[] = [];
-  let inString = false;
-  escape = false;
-
-  for (let i = 0; i < repaired.length; i++) {
-     const char = repaired[i];
-     if (char === '\\' && !escape) { escape = true; continue; }
-     
-     if (char === '"' && !escape) { inString = !inString; }
-     
-     if (!inString && !escape) {
-         if (char === '{') stack.push('}');
-         if (char === '[') stack.push(']');
-         if (char === '}' || char === ']') {
-             if (stack.length > 0) {
-                 const expected = stack[stack.length - 1];
-                 if (char === expected) {
-                     stack.pop();
-                 }
-             }
-         }
-     }
-     escape = false;
-  }
-  
-  // Append all missing closers
-  while(stack.length > 0) {
-      repaired += stack.pop();
-  }
-  
-  return repaired;
-};
-
-// --- MANUAL MODE (Helper) ---
-export const createManualManuscript = (text: string): ManuscriptData => {
-  const cleanText = text.replace(/<[^>]*>/g, '\n').trim(); 
-  const lines = cleanText.split('\n').filter(line => line.trim().length > 0);
-  
-  const title = lines.length > 0 ? lines[0] : "Untitled Manuscript";
-  const bodyContent = lines.slice(1).join('\n\n') || "Paste your manuscript content here...";
-
-  const vol = "3";
-  const issue = "1";
-  const year = new Date().getFullYear().toString();
-  const acceptedDate = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
-
-  return {
-    title: title,
-    authors: [
-      { name: "Author Name", affiliation: "Affiliation", email: "email@example.com" }
-    ],
-    abstract: "Abstract content...",
-    keywords: ["Keyword1", "Keyword2"],
-    sections: [
-      {
-        heading: "Main Content",
-        content: bodyContent
-      }
-    ],
-    references: ["Reference 1"],
-    doi: "10.xxxxx/jbsh.vX.iX.xxxx",
-    volume: vol,
-    issue: issue,
-    year: year,
-    pages: "1-12",
-    receivedDate: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }),
-    acceptedDate: acceptedDate,
-    publishedDate: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }),
-    figures: [],
-    logoUrl: "https://raw.githubusercontent.com/stackblitz/stackblitz-images/main/jbsh-logo-placeholder.png",
-    // LoA Defaults
-    loaNumber: `JBSH/${year}/LOA/${Math.floor(Math.random() * 1000).toString().padStart(4, '0')}`,
-    loaDate: acceptedDate,
-    loaBody: generateLoaBody(title, vol, issue, year)
-  };
-};
-
-export const parseManuscript = async (text: string): Promise<ManuscriptData> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  
-  // PRIORITY: Flash first (Fast & High Quota), then Pro (Quality but Limited)
-  // This solves the 429 error by defaulting to the "lighter" model first.
-  const modelsToTry = ["gemini-3-flash-preview", "gemini-3-pro-preview"];
+  // Create a context string for the available figures to help AI map them correctly
+  const figureContext = availableFigures.length > 0 
+    ? `The user has uploaded these figures: ${JSON.stringify(availableFigures.map(f => ({ id: f.id, name: f.name })))}. 
+       IMPORTANT: You must scan the text for references to these figures (e.g., "Figure 1", "Fig. 1", "Figure 2"). 
+       When you find a reference, insert the Markdown image code: ![Figure Name](figure-id) on a NEW LINE immediately after the paragraph that references it. 
+       Use the EXACT IDs provided (e.g., figure-1, figure-2).`
+    : "No figures have been uploaded yet. If figures are mentioned, ignore image insertion.";
 
   const prompt = `
-    You are an AI Assistant for the Journal of Biomedical Sciences and Health (JBSH).
-    Convert the raw manuscript text below into a structured JSON object.
+    SYSTEM ROLE: You are a High-Fidelity Verbatim Extraction Engine for Biomedical Manuscripts.
+    OBJECTIVE: Extract content from the provided manuscript into structured JSON with 100% TEXTUAL INTEGRITY.
 
-    Instructions:
-    1. Organize the content into: Title, Authors, Abstract, Keywords, Sections (IMRAD), and References.
-    2. Preserve the core content and paragraphs. 
-    3. Fix obvious formatting issues (like line breaks in the middle of sentences).
-    4. Remove page numbers or running headers.
-    5. FORMULAS: If you encounter mathematical formulas or equations, keep them on their own separate line to ensure clear formatting.
-    6. TABLES: If you detect data presented in rows and columns (either in text format or existing HTML tables), convert them into standard HTML <table> structures. Use <thead> for headers and <tbody> for the body.
-    7. Ensure the Output is Valid JSON.
+    *** CRITICAL INSTRUCTIONS: READ CAREFULLY ***
+    1.  **NO SUMMARIZATION**: You are strictly FORBIDDEN from summarizing.
+    2.  **NO REWRITING**: Do not change words or grammar. Copy text exactly as it appears.
+    3.  **FULL EXTRACTION**: You must extract the ENTIRETY of the Introduction, Methods, Results, Discussion, and References.
+    4.  **UNSTRUCTURED INPUT**: The input text might be missing newlines between titles, authors, and abstracts.
+        - You must INTELLIGENTLY SPLIT this text.
+        - The Title is usually the first sentence.
+        - Authors follow the title.
+        - Abstract follows authors.
+        - Section Headers (INTRODUCTION, METHODS) are usually capitalized.
 
-    Input Text:
-    ${text}
+    **FORMATTING RULES:**
+    1.  **Paragraphs**: Preserve paragraph breaks using double newlines (\\n\\n).
+    2.  **Tables**: Convert all tables found in the text into valid Markdown Table syntax.
+    3.  **Math**: Enclose equations in $$...$$ (block) or $...$ (inline) for LaTeX rendering.
+    4.  **Figures**: ${figureContext}
+    5.  **References**: Extract the full bibliography list as plain text.
+
+    **INPUT TEXT:**
+    (Provided below)
   `;
 
-  let lastError;
-
-  for (const modelName of modelsToTry) {
-    console.log(`Attempting parse with model: ${modelName}`);
-    
-    // Retry logic
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        const response = await ai.models.generateContent({
-          model: modelName,
-          contents: prompt,
-          config: {
-            responseMimeType: "application/json",
-            responseSchema: manuscriptSchema,
-            temperature: 0.1, 
-            maxOutputTokens: 8192, 
-          },
-        });
-
-        if (response.text) {
-          let cleanText = response.text.replace(/```json/g, '').replace(/```/g, '').trim();
-          
-          try {
-              // ATTEMPT 1: Direct Parse
-              const parsed = JSON.parse(cleanText) as ManuscriptData;
-              return finalizeData(parsed);
-
-          } catch (parseError) {
-              console.warn(`JSON Parse failed for ${modelName}, attempting repair...`);
-              
-              // ATTEMPT 2: Repair Truncated JSON
-              // This fixes the "unterminated string" error by auto-closing the JSON
-              try {
-                  const repairedText = attemptJsonRepair(cleanText);
-                  const parsedRepaired = JSON.parse(repairedText) as ManuscriptData;
-                  
-                  // Fill missing required fields if cut off
-                  if (!parsedRepaired.title) parsedRepaired.title = "Untitled (Recovered)";
-                  if (!parsedRepaired.sections) parsedRepaired.sections = [{ heading: "Partial Content", content: "Content was truncated due to length. Please check the original doc." }];
-                  if (!parsedRepaired.authors) parsedRepaired.authors = [{ name: "Unknown", affiliation: "Unknown" }];
-                  if (!parsedRepaired.keywords) parsedRepaired.keywords = [];
-                  if (!parsedRepaired.references) parsedRepaired.references = [];
-                  if (!parsedRepaired.abstract) parsedRepaired.abstract = "Abstract not found or truncated.";
-
-                  console.log("JSON Repair Successful!");
-                  return finalizeData(parsedRepaired);
-                  
-              } catch (repairError) {
-                  console.error("JSON Repair Failed:", repairError);
-                  // Only throw if we have no other models to try
-                  if (modelName === modelsToTry[modelsToTry.length - 1]) {
-                       throw new Error("Manuscript is too long/complex for AI. Please try cutting it in half or use Manual Mode.");
-                  }
+  try {
+    const response = await ai.models.generateContent({
+      model: modelName, 
+      contents: [
+        { role: 'user', parts: [{ text: prompt }] },
+        { role: 'user', parts: [{ text: rawText }] }
+      ],
+      config: {
+        maxOutputTokens: 65536, 
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            title: { type: Type.STRING, description: "EXTRACT VERBATIM. Do not Capitalize if not capitalized in source." },
+            articleType: { type: Type.STRING, description: "Detect type (e.g. Original Research) or default." },
+            doi: { type: Type.STRING, description: "Extract DOI if present (e.g. 10.xxxx/...). Return null if not found." }, 
+            abstract: { type: Type.STRING, description: "EXTRACT VERBATIM. The full abstract text." },
+            keywords: { type: Type.ARRAY, items: { type: Type.STRING } },
+            authors: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  name: { type: Type.STRING },
+                  affiliation: { type: Type.STRING },
+                  email: { type: Type.STRING, nullable: true },
+                  isCorresponding: { type: Type.BOOLEAN, nullable: true }
+                }
               }
+            },
+            contentSections: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                   header: { type: Type.STRING, description: "The section header (e.g. '1. INTRODUCTION'). Copy exact numbering." },
+                   body: { type: Type.STRING, description: "THE FULL VERBATIM CONTENT of this section in Markdown. Include ALL paragraphs, tables, and figure links." }
+                }
+              }
+            }
           }
         }
-        if (!response.text && attempt === 2) throw new Error("Empty response from AI");
-
-      } catch (error: any) {
-        console.warn(`Attempt ${attempt} with ${modelName} failed:`, error.message);
-        lastError = error;
-        
-        // Handle 429 (Quota)
-        if (error.message?.includes("429") || error.message?.includes("RESOURCE_EXHAUSTED")) {
-          const waitTime = attempt * 2000;
-          console.log(`Quota hit, waiting ${waitTime}ms...`);
-          await sleep(waitTime); 
-          continue; 
-        }
-
-        // Break to next model on non-retriable errors
-        break; 
       }
+    });
+
+    if (response.text) {
+      const json = JSON.parse(response.text) as RawGeminiResponse;
+      
+      let joinedContent = "";
+      if (json.contentSections && Array.isArray(json.contentSections)) {
+        joinedContent = json.contentSections
+          .map(section => {
+             const header = section.header.startsWith('#') ? section.header : `## ${section.header}`;
+             return `${header}\n\n${section.body}`; 
+          })
+          .join('\n\n');
+      }
+
+      if (joinedContent) {
+        joinedContent = joinedContent.replace(/\\n/g, '\n');
+      }
+
+      return {
+        ...json,
+        content: joinedContent 
+      };
     }
+    return {};
+  } catch (error) {
+    console.error("Error parsing manuscript with Gemini:", error);
+    throw error;
   }
-  
-  throw new Error(lastError?.message || "AI processing failed. Please use Manual Mode.");
 };
 
-// Helper to add metadata fields
-const finalizeData = (parsed: ManuscriptData): ManuscriptData => {
-    const vol = "3";
-    const issue = "1";
-    const year = new Date().getFullYear().toString();
-    const acceptedDate = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
-
-    return {
-    ...parsed,
-    doi: "10.xxxxx/jbsh.vX.iX.xxxx",
-    volume: vol,
-    issue: issue,
-    year: year,
-    pages: "1-12",
-    receivedDate: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }),
-    acceptedDate: acceptedDate,
-    publishedDate: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }),
-    figures: [],
-    logoUrl: "https://raw.githubusercontent.com/stackblitz/stackblitz-images/main/jbsh-logo-placeholder.png",
-    // LoA Defaults
-    loaNumber: `JBSH/${year}/LOA/${Math.floor(Math.random() * 1000).toString().padStart(4, '0')}`,
-    loaDate: acceptedDate,
-    loaBody: generateLoaBody(parsed.title || "Untitled", vol, issue, year) 
-    };
-}
+export const improveAbstract = async (
+  abstract: string, 
+  userKey?: string, 
+  userModel?: string
+): Promise<string> => {
+  const ai = getAIInstance(userKey);
+  const modelName = userModel || DEFAULT_MODEL;
+  
+  const response = await ai.models.generateContent({
+    model: modelName,
+    contents: `Rewrite the following abstract to be more concise, academic, and impactful for a high-impact biomedical journal. Ensure it has clear structure (Background, Methods, Results, Conclusion) but do not bold them in the output text, just write natural text. Keep it under 250 words.\n\n${abstract}`,
+  });
+  
+  return response.text || abstract;
+};

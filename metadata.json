@@ -1,5 +1,5 @@
 {
   "name": "JBSH Manuscript Generator",
-  "description": "A professional AI-powered tool for Journal of Biomedical Sciences and Health editors to automatically format and design manuscripts into Scopus/Elsevier-style layouts ready for publication.",
+  "description": "Professional manuscript production tool for the Journal of Biomedical Sciences and Health. Converts raw text into publication-ready layouts using AI.",
   "requestFramePermissions": []
 }

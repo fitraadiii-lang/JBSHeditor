@@ -2,46 +2,41 @@ export interface Author {
   name: string;
   affiliation: string;
   email?: string;
+  isCorresponding?: boolean;
 }
 
-export interface Section {
-  heading: string;
-  content: string; // HTML or Markdown string
-}
-
-export interface ManuscriptFigure {
+export interface Figure {
   id: string;
-  fileUrl: string;
-  caption: string;
+  name: string; // e.g., "Figure 1"
+  file: File;
+  previewUrl: string;
 }
 
-export interface ManuscriptData {
+export interface ArticleData {
   title: string;
+  articleType: string; // e.g., "Original Research", "Review", "Case Report"
   authors: Author[];
   abstract: string;
   keywords: string[];
-  sections: Section[];
-  references: string[];
-  figures: ManuscriptFigure[]; // New field for images
+  content: string; // Markdown content
   doi?: string;
-  volume?: string;
-  issue?: string;
-  year?: string;
-  pages?: string;
   receivedDate?: string;
+  revisedDate?: string;
   acceptedDate?: string;
   publishedDate?: string;
-  logoUrl?: string;
-  // LoA Specific Fields
-  loaNumber?: string;
-  loaDate?: string;
-  loaBody?: string;
+  volume?: string;
+  issue?: string;
+  pages?: string;
+  figures: Figure[];
+  logoUrl?: string; // New field for custom journal logo
+  geminiApiKey?: string;
+  geminiModel?: string;
 }
 
-export enum AppState {
-  LOGIN = 'LOGIN',
-  UPLOAD = 'UPLOAD',
-  PROCESSING = 'PROCESSING',
-  METADATA_REVIEW = 'METADATA_REVIEW',
-  PREVIEW = 'PREVIEW',
+export enum EditorTab {
+  METADATA = 'METADATA',
+  CONTENT = 'CONTENT',
+  FIGURES = 'FIGURES',
+  AI_TOOLS = 'AI_TOOLS',
+  QC = 'QC'
 }
