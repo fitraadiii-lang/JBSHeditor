@@ -27,6 +27,27 @@ interface RawGeminiResponse {
   }>;
 }
 
+const MAX_RETRIES = 3;
+const INITIAL_RETRY_DELAY = 2000; // 2 seconds
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+const callGeminiWithRetry = async (fn: () => Promise<any>, retries = MAX_RETRIES): Promise<any> => {
+  try {
+    return await fn();
+  } catch (error: any) {
+    const isRetryable = error?.status === 503 || error?.message?.includes('503') || error?.message?.includes('high demand');
+    
+    if (isRetryable && retries > 0) {
+      const delay = INITIAL_RETRY_DELAY * (MAX_RETRIES - retries + 1);
+      console.warn(`Gemini API busy (503). Retrying in ${delay}ms... (${retries} retries left)`);
+      await sleep(delay);
+      return callGeminiWithRetry(fn, retries - 1);
+    }
+    throw error;
+  }
+};
+
 export const parseRawManuscript = async (
   rawText: string, 
   availableFigures: Figure[] = [], 
@@ -36,7 +57,7 @@ export const parseRawManuscript = async (
   const ai = getAIInstance(userKey);
   const modelName = userModel || DEFAULT_MODEL;
 
-  // Create a context string for the available figures to help AI map them correctly
+  // ... (figureContext and prompt logic remains same)
   const figureContext = availableFigures.length > 0 
     ? `The user has uploaded these figures: ${JSON.stringify(availableFigures.map(f => ({ id: f.id, name: f.name })))}. 
        IMPORTANT: You must scan the text for references to these figures (e.g., "Figure 1", "Fig. 1", "Figure 2"). 
@@ -71,7 +92,7 @@ export const parseRawManuscript = async (
   `;
 
   try {
-    const response = await ai.models.generateContent({
+    const response = await callGeminiWithRetry(() => ai.models.generateContent({
       model: modelName, 
       contents: [
         { role: 'user', parts: [{ text: prompt }] },
@@ -85,7 +106,7 @@ export const parseRawManuscript = async (
           properties: {
             title: { type: Type.STRING, description: "EXTRACT VERBATIM. Do not Capitalize if not capitalized in source." },
             articleType: { type: Type.STRING, description: "Detect type (e.g. Original Research) or default." },
-            doi: { type: Type.STRING, description: "Extract DOI if present (e.g. 10.xxxx/...). Return null if not found." }, 
+            doi: { type: Type.STRING, description: "Extract DOI if present (e.g. 10.34310/jbsh...). If not found, do NOT return 'null' string, return an empty string." }, 
             abstract: { type: Type.STRING, description: "EXTRACT VERBATIM. The full abstract text." },
             keywords: { type: Type.ARRAY, items: { type: Type.STRING } },
             authors: {
@@ -113,10 +134,15 @@ export const parseRawManuscript = async (
           }
         }
       }
-    });
+    }));
 
     if (response.text) {
       const json = JSON.parse(response.text) as RawGeminiResponse;
+      
+      // Clean up "null" strings that AI might return
+      if (json.doi === "null") json.doi = "";
+      if (json.title === "null") json.title = "";
+      if (json.abstract === "null") json.abstract = "";
       
       let joinedContent = "";
       if (json.contentSections && Array.isArray(json.contentSections)) {
@@ -152,10 +178,10 @@ export const improveAbstract = async (
   const ai = getAIInstance(userKey);
   const modelName = userModel || DEFAULT_MODEL;
   
-  const response = await ai.models.generateContent({
+  const response = await callGeminiWithRetry(() => ai.models.generateContent({
     model: modelName,
     contents: `Rewrite the following abstract to be more concise, academic, and impactful for a high-impact biomedical journal. Ensure it has clear structure (Background, Methods, Results, Conclusion) but do not bold them in the output text, just write natural text. Keep it under 250 words.\n\n${abstract}`,
-  });
+  }));
   
   return response.text || abstract;
 };

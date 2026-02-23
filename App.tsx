@@ -73,6 +73,8 @@ const App: React.FC = () => {
         // Ensure defaults if partial data returned
         authors: (parsedData.authors && parsedData.authors.length > 0) ? parsedData.authors : prev.authors,
         keywords: (parsedData.keywords && parsedData.keywords.length > 0) ? parsedData.keywords : prev.keywords,
+        // Prevent overwriting DOI if the new one is empty/null
+        doi: parsedData.doi || prev.doi,
         // IMPORTANT: We do not overwrite figures here, as they are managed manually in step 1
         figures: prev.figures 
       }));

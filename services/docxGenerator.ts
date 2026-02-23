@@ -42,8 +42,9 @@ const getImageData = async (source: string | File): Promise<ArrayBuffer> => {
     if (source instanceof File) {
       return await source.arrayBuffer();
     }
-    const response = await fetch(source);
-    if (!response.ok) throw new Error("Failed to fetch image");
+    // Added referrerPolicy to help with some CORS/Security restrictions
+    const response = await fetch(source, { referrerPolicy: 'no-referrer' });
+    if (!response.ok) throw new Error(`Failed to fetch image: ${response.statusText}`);
     return await response.arrayBuffer();
   } catch (error) {
     console.error("Error getting image data:", error);
@@ -51,13 +52,18 @@ const getImageData = async (source: string | File): Promise<ArrayBuffer> => {
   }
 };
 
-// Helper for "Capitalize Each Word"
+// Helper for "Capitalize Each Word" with APA-style minor words handling
 const toTitleCase = (str: string) => {
   if (!str) return '';
-  return str.replace(
-    /\w\S*/g,
-    (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase()
-  );
+  const minorWords = ['of', 'and', 'as', 'in', 'the', 'to', 'for', 'with', 'on', 'at', 'by', 'from', 'a', 'an'];
+  return str.split(' ').map((word, index) => {
+    const lowerWord = word.toLowerCase();
+    // Capitalize if it's the first word or not a minor word
+    if (index === 0 || !minorWords.includes(lowerWord)) {
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    }
+    return lowerWord;
+  }).join(' ');
 };
 
 // Helper function to turn LaTeX/Math code into readable text
@@ -267,19 +273,29 @@ export const generateDocx = async (data: ArticleData) => {
   });
 
   // 3. Citation
-  const firstAuthor = data.authors?.[0]?.name || "Author";
-  const firstAuthorSurname = firstAuthor.split(' ').pop() || firstAuthor;
-  const runningAuthor = (data.authors || []).length > 1 ? `${firstAuthorSurname} et al.` : firstAuthorSurname;
-  const etAl = (data.authors || []).length > 1 ? " et al." : "";
-  const titleFormatted = toTitleCase(data.title || "Untitled Article");
   const year = new Date().getFullYear();
+  const authorNames = (data.authors || []).map(a => a.name);
+  let authorsStr = "";
+  
+  if (authorNames.length === 1) {
+    authorsStr = authorNames[0];
+  } else if (authorNames.length === 2) {
+    authorsStr = `${authorNames[0]} & ${authorNames[1]}`;
+  } else if (authorNames.length > 0) {
+    // APA Style for multiple authors
+    authorsStr = authorNames.slice(0, -1).join(", ") + ", & " + authorNames[authorNames.length - 1];
+  } else {
+    authorsStr = "Author";
+  }
+
+  const titleFormatted = toTitleCase(data.title || "Untitled Article");
   const citationRuns: (TextRun | ExternalHyperlink)[] = [
       new TextRun({ text: "Cite this article: ", bold: true, size: 20, font: FONT_FAMILY, color: "0c4a6e" }), // Brand color 900
-      new TextRun({ text: `${firstAuthor}${etAl} (${year}). ${titleFormatted}. `, size: 20, font: FONT_FAMILY }),
+      new TextRun({ text: `${authorsStr} (${year}). ${titleFormatted}. `, size: 20, font: FONT_FAMILY }),
       new TextRun({ text: "Journal of Biomedical Sciences and Health", italics: true, size: 20, font: FONT_FAMILY }),
       new TextRun({ text: ", ", size: 20, font: FONT_FAMILY }),
-      new TextRun({ text: data.volume || 'X', italics: true, size: 20, font: FONT_FAMILY }),
-      new TextRun({ text: `(${data.issue || 'X'}), ${data.pages || '...'}. `, size: 20, font: FONT_FAMILY }),
+      new TextRun({ text: data.volume || '3', italics: true, size: 20, font: FONT_FAMILY }),
+      new TextRun({ text: `(${data.issue || '1'}), ${data.pages || '1-10'}. `, size: 20, font: FONT_FAMILY }),
       new ExternalHyperlink({
           children: [
             new TextRun({ text: `https://doi.org/${data.doi || '...'}`, size: 20, font: FONT_FAMILY, color: "0ea5e9", underline: { type: "single", color: "0ea5e9" } })
@@ -287,10 +303,16 @@ export const generateDocx = async (data: ArticleData) => {
           link: `https://doi.org/${data.doi || '...'}`
       })
   ];
+  
+  const firstAuthor = data.authors?.[0]?.name || "Author";
+  const firstAuthorSurname = firstAuthor.split(' ').pop() || firstAuthor;
+  const runningAuthor = (data.authors || []).length > 1 ? `${firstAuthorSurname} et al.` : firstAuthorSurname;
   const journalInfoShort = `J. Biomed. Sci. Health. ${year}; ${data.volume || '3'}(${data.issue || '1'}): ${data.pages || '1-10'}`;
 
   // 4. Logo
-  const CC_LOGO_URL = "https://licensebuttons.net/l/by/4.0/88x31.png";
+  // Use Base64 for CC Logo to guarantee it appears in DOCX without network/CORS issues
+  const CC_LOGO_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAFgAAAAfCAMAAABm868vAAAAGXRFWHRTb2Z0d2FyZQBBZG9iZSBJbWFnZVJlYWR5ccllPAAAAyJpVFh0WE1MOmNvbS5hZG9iZS54bXAAAAAAADw/eHBhY2tldCBiZWdpbj0i77u/IiBpZD0iVzVNME1wQ2VoaUh6cmVTek5UY3prYzlkIj8+IDx4OnhtcG1ldGEgeG1sbnM6eD0iYWRvYmU6bnM6bWV0YS8iIHg6eG1wdGs9IkFkb2JlIFhNUCBDb3JlIDUuNi1jMTM4IDc5LjE1OTgyNCwgMjAxNi8wOS8xNC0wMTowOTowMSAgICAgICAgIj4gPHJkZjpSREYgeG1sbnM6cmRmPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5LzAyLzIyLXJkZi1zeW50YXgtbnMjIj4gPHJkZjpEZXNjcmlwdGlvbiByZGY6YWJvdXQ9IiIgeG1sbnM6eG1wPSJodHRwOi8vbnMuYWRvYmUuY29tL3hhcC8xLjAvIiB4bWxuczp4bXBNTT0iaHR0cDovL25zLmFkb2JlLmNvbS94YXAvMS4xL21tLyIgeG1sbnM6c3RSZWY9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMS9zVHlwZS9SZXNvdXJjZVJlZiMiIHhtcDpDcmVhdG9yVG9vbD0iQWRvYmUgUGhvdG9zaG9wIENDIDIwMTcgKE1hY2ludG9zaCkiIHhtcE1NOkluc3RhbmNlSUQ9InhtcC5paWQ6RjZDM0YyMUMxMTI4MTFFN0E5RThCQzYyODZCQzU0RjQiIHhtcE1NOkRvY3VtZW50SUQ9InhtcC5kaWQ6RjZDM0YyMkMxMTI4MTFFN0E5RThCQzYyODZCQzU0RjQiPiA8eG1wTU06RGVyaXZlZEZyb20gc3RSZWY6aW5zdGFuY2VJRD0ieG1wLmlpZDpGNkMzRjIxQTExMjgxMUU3QTlFOEJDNjI4NkJCNTRGNCIgc3RSZWY6ZG9jdW1lbnRJRD0ieG1wLmRpZDpGNkMzRjIxQjExMjgxMUU3QTlFOEJDNjI4NkJCNTRGNCIvPiA8L3JkZjpEZXNjcmlwdGlvbj4gPC9yZGY6UkRGPiA8L3g6eG1wbWV0YT4gPD94cGFja2V0IGVuZD0iciI/Pj7S96UAAAAGUExURf///wAAAJpxG2UAAAAIdFJOU/////////8A9069EwAAAJBJREFUeNrs0ssOgCAMBFDe8P8/u7E0asAY9YI38S7m0S0pUis999p7D6699669N8YI8Yf7YIwxXmNM8RpjiteYUrLGmJI1xpSsMaZkjTElY4wpGWNMSRhjSMIYQxLGmJIwxpCEMYYkjDEkYIwhAWMMCRhjSMAYQwLGGBIwxpCAMYYEjDEkYIwhAWMMCRhjSMAYQwLGGBI6AgwA9pYI86Yv93IAAAAASUVORK5CYII=";
+  
   let logoImage: ImageRun | undefined;
   let ccLogoImage: ImageRun | undefined;
 
@@ -303,13 +325,27 @@ export const generateDocx = async (data: ArticleData) => {
     } catch (e) { console.warn("Logo load error", e); }
   }
 
-  try {
-    const ccLogoBuffer = await getImageData(CC_LOGO_URL);
-    if (ccLogoBuffer.byteLength > 0) {
-        // 88x31 pixels at 96 DPI is approx 66x23 points
-        ccLogoImage = new ImageRun({ data: ccLogoBuffer, transformation: { width: 66, height: 23 } });
-    }
-  } catch (e) { console.warn("CC Logo load error", e); }
+  if (data.licenseLogoUrl) {
+    try {
+      const licenseLogoBuffer = await getImageData(data.licenseLogoUrl);
+      if (licenseLogoBuffer.byteLength > 0) {
+          // 88x31 pixels at 96 DPI is approx 66x23.25 points. Using precise ratio to avoid "lonjong" look.
+          ccLogoImage = new ImageRun({ data: licenseLogoBuffer, transformation: { width: 66, height: 23.25 } });
+      }
+    } catch (e) { console.warn("Custom License Logo load error", e); }
+  } else {
+    try {
+      // Convert base64 to ArrayBuffer for default CC logo
+      const binaryString = window.atob(CC_LOGO_BASE64);
+      const len = binaryString.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+      }
+      // 88x31 pixels at 96 DPI is approx 66x23.25 points. Using precise ratio to avoid "lonjong" look.
+      ccLogoImage = new ImageRun({ data: bytes.buffer, transformation: { width: 66, height: 23.25 } });
+    } catch (e) { console.warn("CC Logo embed error", e); }
+  }
 
   // Header Table
   const headerTable = new Table({
@@ -366,9 +402,30 @@ export const generateDocx = async (data: ArticleData) => {
   // Footer for Page 1
   const firstPageFooter = new Footer({
       children: [
-         // Removed Open Access Text from Footer as it is now in the main body
-         new Paragraph({ alignment: AlignmentType.CENTER, children: [ new TextRun({ text: "Journal of Biomedical Sciences and Health", bold: true, size: 18, font: FONT_FAMILY }) ], border: { top: { style: BorderStyle.SINGLE, size: 6 } }, spacing: { before: 100 } }),
-         new Paragraph({ alignment: AlignmentType.CENTER, children: [ new TextRun({ text: `Copyright © ${year} The Author(s). Published by Universitas Karya Husada Semarang, Indonesia`, size: 16, font: FONT_FAMILY }) ] }),
+         new Table({
+             width: { size: 100, type: WidthType.PERCENTAGE },
+             borders: { top: { style: BorderStyle.SINGLE, size: 6, color: "000000" }, bottom: { style: BorderStyle.NONE }, left: { style: BorderStyle.NONE }, right: { style: BorderStyle.NONE }, insideHorizontal: { style: BorderStyle.NONE }, insideVertical: { style: BorderStyle.NONE } },
+             rows: [
+                 new TableRow({
+                     children: [
+                         new TableCell({
+                             width: { size: 100, type: WidthType.PERCENTAGE },
+                             shading: { fill: "f9fafb", type: ShadingType.CLEAR, color: "auto" },
+                             margins: { top: 100, bottom: 100, left: 100, right: 100 },
+                             children: [
+                                 new Paragraph({
+                                     children: [
+                                         ...(ccLogoImage ? [ccLogoImage, new TextRun({ text: "   ", size: 18 })] : []),
+                                         new TextRun({ text: "This work is licensed under a Creative Commons Attribution 4.0 International License (CC BY 4.0)", font: FONT_FAMILY, size: 18 })
+                                     ],
+                                     alignment: AlignmentType.JUSTIFIED
+                                 })
+                             ]
+                         })
+                     ]
+                 })
+             ]
+         }),
          new Paragraph({ alignment: AlignmentType.RIGHT, children: [ new TextRun({ text: "1", size: 22, font: FONT_FAMILY }) ], spacing: { before: 60 } }),
       ]
   });
@@ -431,23 +488,7 @@ export const generateDocx = async (data: ArticleData) => {
       width: { size: 100, type: WidthType.PERCENTAGE }, 
       alignment: AlignmentType.CENTER, 
       borders: { top: { style: BorderStyle.SINGLE, size: 1, color: "aaaaaa" }, bottom: { style: BorderStyle.SINGLE, size: 1, color: "aaaaaa" }, left: { style: BorderStyle.SINGLE, size: 36, color: "0c4a6e" }, right: { style: BorderStyle.SINGLE, size: 1, color: "aaaaaa" } },
-      rows: [ new TableRow({ children: [ new TableCell({ shading: { fill: "f0f9ff", type: ShadingType.CLEAR, color: "auto" }, margins: { top: 100, bottom: 100, left: 100, right: 100 }, children: [ new Paragraph({ children: citationRuns }) ] }) ] }) ]
-  });
-
-  // Open Access Table (Below Citation)
-  const openAccessTable = new Table({
-      width: { size: 100, type: WidthType.PERCENTAGE },
-      alignment: AlignmentType.CENTER,
-      borders: { top: { style: BorderStyle.SINGLE, size: 1, color: "cccccc" }, bottom: { style: BorderStyle.SINGLE, size: 1, color: "cccccc" }, left: { style: BorderStyle.SINGLE, size: 1, color: "cccccc" }, right: { style: BorderStyle.SINGLE, size: 1, color: "cccccc" } },
-      rows: [ new TableRow({ children: [ new TableCell({ shading: { fill: "f9fafb", type: ShadingType.CLEAR, color: "auto" }, margins: { top: 100, bottom: 100, left: 100, right: 100 }, children: [ 
-          new Paragraph({ 
-              children: [
-                ...(ccLogoImage ? [ccLogoImage, new TextRun({ text: "   ", size: 18 })] : []),
-                new TextRun({ text: "This work is licensed under a Creative Commons Attribution 4.0 International License (CC BY 4.0)", font: FONT_FAMILY, size: 18 })
-              ],
-              alignment: AlignmentType.CENTER
-          }) 
-      ] }) ] }) ]
+      rows: [ new TableRow({ children: [ new TableCell({ shading: { fill: "f0f9ff", type: ShadingType.CLEAR, color: "auto" }, margins: { top: 100, bottom: 100, left: 100, right: 100 }, children: [ new Paragraph({ children: citationRuns, alignment: AlignmentType.JUSTIFIED }) ] }) ] }) ]
   });
 
   // --- 11. ROBUST BODY CONTENT PARSING (State Machine) ---
@@ -633,9 +674,9 @@ export const generateDocx = async (data: ArticleData) => {
                 new TextRun({ text: "DOI: ", color: "0ea5e9", size: 20, font: FONT_FAMILY }),
                 new ExternalHyperlink({
                     children: [
-                      new TextRun({ text: data.doi || '...', color: "0ea5e9", size: 20, font: FONT_FAMILY })
+                      new TextRun({ text: (data.doi && data.doi !== "null") ? data.doi : '...', color: "0ea5e9", size: 20, font: FONT_FAMILY })
                     ],
-                    link: `https://doi.org/${data.doi || ''}`
+                    link: `https://doi.org/${(data.doi && data.doi !== "null") ? data.doi : ''}`
                 }),
                 new TextRun({ text: "\t", font: FONT_FAMILY }),
                 new TextRun({ text: `Pages ${data.pages || '...'}`, size: 20, font: FONT_FAMILY }),
@@ -658,7 +699,6 @@ export const generateDocx = async (data: ArticleData) => {
           new Paragraph({ spacing: { after: 240 } }),
           citationTable,
           new Paragraph({ spacing: { after: 120 } }),
-          openAccessTable, // Added Open Access Table here
           new Paragraph({ spacing: { after: 240 } }),
         ],
       },

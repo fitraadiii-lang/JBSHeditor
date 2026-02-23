@@ -16,6 +16,8 @@ const Editor: React.FC<EditorProps> = ({ data, onChange, onImport, onImproveAbst
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [extractionLoading, setExtractionLoading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
+  const [dragActiveLogo, setDragActiveLogo] = useState(false);
+  const [dragActiveLicense, setDragActiveLicense] = useState(false);
   const [rawWordCount, setRawWordCount] = useState<number>(0); 
   
   // NEW: State for raw text preview before sending to AI
@@ -24,6 +26,7 @@ const Editor: React.FC<EditorProps> = ({ data, onChange, onImport, onImproveAbst
   const fileInputRef = useRef<HTMLInputElement>(null);
   const figureInputRef = useRef<HTMLInputElement>(null);
   const logoInputRef = useRef<HTMLInputElement>(null);
+  const licenseInputRef = useRef<HTMLInputElement>(null);
 
   const updateField = <K extends keyof ArticleData>(field: K, value: ArticleData[K]) => {
     onChange({ ...data, [field]: value });
@@ -55,6 +58,14 @@ const Editor: React.FC<EditorProps> = ({ data, onChange, onImport, onImproveAbst
       const file = e.target.files[0];
       const logoUrl = URL.createObjectURL(file);
       updateField('logoUrl', logoUrl);
+    }
+  };
+
+  const handleLicenseUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      const logoUrl = URL.createObjectURL(file);
+      updateField('licenseLogoUrl', logoUrl);
     }
   };
 
@@ -146,6 +157,48 @@ const Editor: React.FC<EditorProps> = ({ data, onChange, onImport, onImproveAbst
       setDragActive(true);
     } else if (e.type === "dragleave") {
       setDragActive(false);
+    }
+  };
+
+  const handleDragLogo = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setDragActiveLogo(true);
+    } else if (e.type === "dragleave") {
+      setDragActiveLogo(false);
+    }
+  };
+
+  const handleDropLogo = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActiveLogo(false);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      const file = e.dataTransfer.files[0];
+      const logoUrl = URL.createObjectURL(file);
+      updateField('logoUrl', logoUrl);
+    }
+  };
+
+  const handleDragLicense = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setDragActiveLicense(true);
+    } else if (e.type === "dragleave") {
+      setDragActiveLicense(false);
+    }
+  };
+
+  const handleDropLicense = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActiveLicense(false);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      const file = e.dataTransfer.files[0];
+      const logoUrl = URL.createObjectURL(file);
+      updateField('licenseLogoUrl', logoUrl);
     }
   };
 
@@ -279,12 +332,14 @@ const Editor: React.FC<EditorProps> = ({ data, onChange, onImport, onImproveAbst
             <div className="bg-white p-4 rounded border border-gray-200 shadow-sm">
                 <div className="flex justify-between items-center mb-2">
                     <h3 className="text-xs font-bold text-gray-700 uppercase">Journal Logo</h3>
-                    <button 
-                        onClick={() => logoInputRef.current?.click()}
-                        className="text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded hover:bg-gray-200 flex items-center gap-1 border border-gray-300"
-                    >
-                        <LogoIcon size={12} /> Upload
-                    </button>
+                    <div className="flex gap-2">
+                        <button 
+                            onClick={() => logoInputRef.current?.click()}
+                            className="text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded hover:bg-gray-200 flex items-center gap-1 border border-gray-300"
+                        >
+                            <LogoIcon size={12} /> Upload
+                        </button>
+                    </div>
                     <input 
                         type="file" 
                         ref={logoInputRef}
@@ -293,15 +348,118 @@ const Editor: React.FC<EditorProps> = ({ data, onChange, onImport, onImproveAbst
                         onChange={handleLogoUpload}
                     />
                 </div>
-                {data.logoUrl ? (
-                    <div className="flex items-center gap-3">
-                        <img src={data.logoUrl} alt="Logo" className="h-12 w-12 object-contain bg-white border rounded" />
-                        <span className="text-xs text-gray-600">Custom logo active</span>
-                        <button onClick={() => updateField('logoUrl', undefined)} className="text-red-500 hover:underline text-xs">Remove</button>
+
+                <div 
+                    className={`border-2 border-dashed rounded-md p-4 mb-3 flex flex-col items-center justify-center text-center transition-colors cursor-pointer ${
+                        dragActiveLogo ? 'border-brand-500 bg-brand-50' : 'border-gray-200 bg-gray-50 hover:bg-gray-100'
+                    }`}
+                    onDragEnter={handleDragLogo}
+                    onDragLeave={handleDragLogo}
+                    onDragOver={handleDragLogo}
+                    onDrop={handleDropLogo}
+                    onClick={() => logoInputRef.current?.click()}
+                >
+                    {data.logoUrl ? (
+                        <div className="flex flex-col items-center gap-2">
+                            <img src={data.logoUrl} alt="Logo" className="h-16 w-16 object-contain bg-white border rounded shadow-sm" />
+                            <span className="text-[10px] text-brand-700 font-bold">Logo Active</span>
+                        </div>
+                    ) : (
+                        <>
+                            <LogoIcon size={24} className="text-gray-400 mb-1" />
+                            <p className="text-[10px] text-gray-500">Drag logo here or click to upload</p>
+                        </>
+                    )}
+                </div>
+
+                <div className="space-y-2">
+                    <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider">Or Paste Logo URL</label>
+                    <div className="flex gap-2">
+                        <input 
+                            type="text"
+                            value={data.logoUrl || ''}
+                            onChange={(e) => updateField('logoUrl', e.target.value)}
+                            className="flex-1 text-xs border rounded p-1.5 focus:ring-1 focus:ring-brand-500 outline-none"
+                            placeholder="https://example.com/logo.png"
+                        />
+                        {data.logoUrl && (
+                            <button 
+                                onClick={() => updateField('logoUrl', undefined)}
+                                className="text-red-500 hover:bg-red-50 p-1 rounded border border-red-100"
+                                title="Remove Logo"
+                            >
+                                <X size={14} />
+                            </button>
+                        )}
                     </div>
-                ) : (
-                    <p className="text-xs text-gray-500 italic">No custom logo. Default JBSH logo will be used.</p>
-                )}
+                </div>
+            </div>
+
+            {/* License Logo Upload Section */}
+            <div className="bg-white p-4 rounded border border-gray-200 shadow-sm">
+                <div className="flex justify-between items-center mb-2">
+                    <h3 className="text-xs font-bold text-gray-700 uppercase">License Logo</h3>
+                    <div className="flex gap-2">
+                        <button 
+                            onClick={() => licenseInputRef.current?.click()}
+                            className="text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded hover:bg-gray-200 flex items-center gap-1 border border-gray-300"
+                        >
+                            <LogoIcon size={12} /> Upload
+                        </button>
+                    </div>
+                    <input 
+                        type="file" 
+                        ref={licenseInputRef}
+                        className="hidden"
+                        accept="image/*"
+                        onChange={handleLicenseUpload}
+                    />
+                </div>
+
+                <div 
+                    className={`border-2 border-dashed rounded-md p-4 mb-3 flex flex-col items-center justify-center text-center transition-colors cursor-pointer ${
+                        dragActiveLicense ? 'border-brand-500 bg-brand-50' : 'border-gray-200 bg-gray-50 hover:bg-gray-100'
+                    }`}
+                    onDragEnter={handleDragLicense}
+                    onDragLeave={handleDragLicense}
+                    onDragOver={handleDragLicense}
+                    onDrop={handleDropLicense}
+                    onClick={() => licenseInputRef.current?.click()}
+                >
+                    {data.licenseLogoUrl ? (
+                        <div className="flex flex-col items-center gap-2">
+                            <img src={data.licenseLogoUrl} alt="License Logo" className="h-12 w-auto object-contain bg-white border rounded shadow-sm" />
+                            <span className="text-[10px] text-brand-700 font-bold">License Logo Active</span>
+                        </div>
+                    ) : (
+                        <>
+                            <LogoIcon size={24} className="text-gray-400 mb-1" />
+                            <p className="text-[10px] text-gray-500">Drag license logo here or click to upload</p>
+                        </>
+                    )}
+                </div>
+
+                <div className="space-y-2">
+                    <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider">Or Paste License Logo URL</label>
+                    <div className="flex gap-2">
+                        <input 
+                            type="text"
+                            value={data.licenseLogoUrl || ''}
+                            onChange={(e) => updateField('licenseLogoUrl', e.target.value)}
+                            className="flex-1 text-xs border rounded p-1.5 focus:ring-1 focus:ring-brand-500 outline-none"
+                            placeholder="https://example.com/license-logo.png"
+                        />
+                        {data.licenseLogoUrl && (
+                            <button 
+                                onClick={() => updateField('licenseLogoUrl', undefined)}
+                                className="text-red-500 hover:bg-red-50 p-1 rounded border border-red-100"
+                                title="Remove License Logo"
+                            >
+                                <X size={14} />
+                            </button>
+                        )}
+                    </div>
+                </div>
             </div>
 
             {/* Journal Dates */}

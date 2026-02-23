@@ -11,13 +11,18 @@ interface ArticlePreviewProps {
   isEditable?: boolean;
 }
 
-// Helper for "Capitalize Each Word"
+// Helper for "Capitalize Each Word" with APA-style minor words handling
 const toTitleCase = (str: string) => {
   if (!str) return '';
-  return str.replace(
-    /\w\S*/g,
-    (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase()
-  );
+  const minorWords = ['of', 'and', 'as', 'in', 'the', 'to', 'for', 'with', 'on', 'at', 'by', 'from', 'a', 'an'];
+  return str.split(' ').map((word, index) => {
+    const lowerWord = word.toLowerCase();
+    // Capitalize if it's the first word or not a minor word
+    if (index === 0 || !minorWords.includes(lowerWord)) {
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    }
+    return lowerWord;
+  }).join(' ');
 };
 
 const ArticlePreview: React.FC<ArticlePreviewProps> = ({ data, isEditable = false }) => {
@@ -53,19 +58,28 @@ const ArticlePreview: React.FC<ArticlePreviewProps> = ({ data, isEditable = fals
   };
 
   const getCitationString = () => {
-    const firstAuthor = data.authors[0]?.name || "Author";
-    const etAl = data.authors.length > 1 ? " et al." : "";
     const year = new Date().getFullYear();
-    const vol = data.volume || "X";
-    const iss = data.issue || "X";
-    const pgs = data.pages || "1-X";
+    const vol = data.volume || "3";
+    const iss = data.issue || "1";
+    const pgs = data.pages || "1-10";
     const titleCase = toTitleCase(data.title);
-    const doiLink = `https://doi.org/${data.doi || '...'}`;
+    const doiValue = (data.doi && data.doi !== "null") ? data.doi : '...';
+    const doiLink = `https://doi.org/${doiValue}`;
     
-    // APA Style: Title non-italic, Journal & Volume Italic
+    // APA Style: List all authors
+    const authorNames = data.authors.map(a => a.name);
+    let authorsStr = "";
+    if (authorNames.length === 1) {
+      authorsStr = authorNames[0];
+    } else if (authorNames.length === 2) {
+      authorsStr = `${authorNames[0]} & ${authorNames[1]}`;
+    } else {
+      authorsStr = authorNames.slice(0, -1).join(", ") + ", & " + authorNames[authorNames.length - 1];
+    }
+
     return (
         <span>
-            {firstAuthor}{etAl} ({year}). {titleCase}. <em>Journal of Biomedical Sciences and Health</em>, <em>{vol}</em>({iss}), {pgs}. <a href={doiLink} target="_blank" rel="noopener noreferrer" className="text-blue-700 underline hover:text-blue-900">{doiLink}</a>
+            {authorsStr} ({year}). {titleCase}. <em>Journal of Biomedical Sciences and Health</em>, <em>{vol}</em>({iss}), {pgs}. <a href={doiLink} target="_blank" rel="noopener noreferrer" className="text-blue-700 underline hover:text-blue-900">{doiLink}</a>
         </span>
     );
   };
@@ -172,7 +186,7 @@ const ArticlePreview: React.FC<ArticlePreviewProps> = ({ data, isEditable = fals
             {/* Metadata Line */}
             <div className="border-b-2 border-black pb-1 mb-6 flex justify-between items-center text-xs text-black">
                 <span>Vol. {data.volume || '3'}, No. {data.issue || '1'}, {new Date().getFullYear()}</span>
-                <span>DOI: <a href={`https://doi.org/${data.doi || ''}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline hover:text-blue-800">{data.doi || '10.34310/jbsh.vX.iX.xxxx'}</a></span>
+                <span>DOI: <a href={`https://doi.org/${(data.doi && data.doi !== "null") ? data.doi : ''}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline hover:text-blue-800">{(data.doi && data.doi !== "null") ? data.doi : '10.34310/jbsh.vX.iX.xxxx'}</a></span>
                 <span>Pages {data.pages || '1-10'}</span>
             </div>
         </div>
@@ -236,23 +250,8 @@ const ArticlePreview: React.FC<ArticlePreviewProps> = ({ data, isEditable = fals
         </div>
 
         {/* === CITATION BOX === */}
-        <div className="mx-0 mb-4 p-3 bg-cyan-50 border-l-4 border-brand-800 text-[10pt] text-black leading-tight border border-gray-200 shadow-sm">
+        <div className="mx-0 mb-4 p-3 bg-cyan-50 border-l-4 border-brand-800 text-[10pt] text-black leading-tight border border-gray-200 shadow-sm text-justify">
              <span className="font-bold text-brand-900">Cite this article:</span> {getCitationString()}
-        </div>
-
-        {/* === OPEN ACCESS BOX === */}
-        <div className="mx-0 mb-6 p-3 bg-gray-50 border border-gray-200 text-[9pt] text-black leading-tight flex items-center gap-4 rounded-sm">
-             <div className="shrink-0">
-                <img 
-                  src="https://licensebuttons.net/l/by/4.0/88x31.png" 
-                  alt="CC BY 4.0" 
-                  className="h-8 w-auto"
-                  referrerPolicy="no-referrer"
-                />
-             </div>
-             <div>
-                This work is licensed under a <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer" className="underline text-blue-700 hover:text-blue-900">Creative Commons Attribution 4.0 International License (CC BY 4.0)</a>
-             </div>
         </div>
 
         {/* === MAIN CONTENT === */}
@@ -307,8 +306,20 @@ const ArticlePreview: React.FC<ArticlePreviewProps> = ({ data, isEditable = fals
         <div className="mt-auto pt-8 flex flex-col items-center justify-end text-center break-inside-avoid relative">
              <div className="border-t-2 border-black w-full mb-2"></div>
              
-             <p className="font-bold text-[10px]">Journal of Biomedical Sciences and Health</p>
-             <p className="text-[10px]">Copyright © {new Date().getFullYear()} The Author(s). Published by Universitas Karya Husada Semarang, Indonesia</p>
+             {/* Moved License Box to Footer */}
+             <div className="w-full mb-2 p-2 bg-gray-50 border border-gray-200 text-[8pt] text-black leading-tight flex items-center gap-3 rounded-sm">
+                <div className="shrink-0">
+                    <img 
+                      src={data.licenseLogoUrl || "https://licensebuttons.net/l/by/4.0/88x31.png"} 
+                      alt="License Logo" 
+                      className="h-[18px] w-[51px] object-contain"
+                      referrerPolicy="no-referrer"
+                    />
+                </div>
+                <div className="text-justify">
+                    This work is licensed under a <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer" className="underline text-blue-700 hover:text-blue-900">Creative Commons Attribution 4.0 International License (CC BY 4.0)</a>
+                </div>
+             </div>
              
              {/* Page Number Moved to Bottom Right */}
              <div className="w-full text-right mt-1">
