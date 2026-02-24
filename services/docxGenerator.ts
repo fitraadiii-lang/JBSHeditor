@@ -36,6 +36,12 @@ const BODY_FONT_SIZE = 22;
 // CHANGED: 24 half-points = 12pt (Headers)
 const HEADER_FONT_SIZE = 24;
 
+const sanitizeText = (text: string): string => {
+  if (!text) return "";
+  // Remove control characters except newline, tab, and carriage return
+  return text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, "");
+};
+
 // Helper to fetch Blob from URL (for logo) or File
 const getImageData = async (source: string | File): Promise<ArrayBuffer> => {
   try {
@@ -148,7 +154,14 @@ const parseTextToRuns = (text: string, forceBold = false, fontSize = BODY_FONT_S
     }
 
     // --- PLAIN TEXT ---
-    return new TextRun({ text: part, bold: forceBold, font: FONT_FAMILY, size: fontSize });
+    const lines = part.split('\n');
+    return lines.flatMap((line, i) => {
+        const runs = [new TextRun({ text: sanitizeText(line), bold: forceBold, font: FONT_FAMILY, size: fontSize })];
+        if (i < lines.length - 1) {
+            runs.push(new TextRun({ break: 1 }));
+        }
+        return runs;
+    });
   });
 };
 
@@ -205,7 +218,7 @@ const parseMarkdownTable = (tableBlock: string): Table | null => {
           children: safeCells.map(cellText => 
             new TableCell({
               children: [new Paragraph({ 
-                  children: parseTextToRuns(cellText, isHeader, 20), // Tables slightly smaller (10pt) usually
+                  children: parseTextToRuns(sanitizeText(cellText), isHeader, 20), // Tables slightly smaller (10pt) usually
                   alignment: isHeader ? AlignmentType.CENTER : AlignmentType.LEFT,
                   spacing: { before: 60, after: 60 }
               })],
@@ -254,7 +267,7 @@ export const generateDocx = async (data: ArticleData) => {
   // 1. Author Runs
   const authorRuns: TextRun[] = [];
   (data.authors || []).forEach((author, index) => {
-      authorRuns.push(new TextRun({ text: author.name || "Author", bold: true, size: 22, font: FONT_FAMILY })); 
+      authorRuns.push(new TextRun({ text: sanitizeText(author.name || "Author"), bold: true, size: 22, font: FONT_FAMILY })); 
       const affIndex = uniqueAffiliations.indexOf(author.affiliation) + 1;
       let meta = `${affIndex}`;
       if (author.isCorresponding) meta += "*";
@@ -267,14 +280,14 @@ export const generateDocx = async (data: ArticleData) => {
   // 2. Affiliation Runs
   const affRuns: TextRun[] = [];
   uniqueAffiliations.forEach((aff, i) => {
-      if (i > 0) affRuns.push(new TextRun({ text: "\n", font: FONT_FAMILY }));
+      if (i > 0) affRuns.push(new TextRun({ break: 1 }));
       affRuns.push(new TextRun({ text: `${i + 1}`, size: 20, font: FONT_FAMILY, superScript: true }));
-      affRuns.push(new TextRun({ text: ` ${aff}`, italics: true, size: 20, font: FONT_FAMILY }));
+      affRuns.push(new TextRun({ text: ` ${sanitizeText(aff)}`, italics: true, size: 20, font: FONT_FAMILY }));
   });
 
   // 3. Citation
   const year = new Date().getFullYear();
-  const authorNames = (data.authors || []).map(a => a.name);
+  const authorNames = (data.authors || []).map(a => sanitizeText(a.name));
   let authorsStr = "";
   
   if (authorNames.length === 1) {
@@ -288,7 +301,7 @@ export const generateDocx = async (data: ArticleData) => {
     authorsStr = "Author";
   }
 
-  const titleFormatted = toTitleCase(data.title || "Untitled Article");
+  const titleFormatted = toTitleCase(sanitizeText(data.title || "Untitled Article"));
   const citationRuns: (TextRun | ExternalHyperlink)[] = [
       new TextRun({ text: "Cite this article: ", bold: true, size: 20, font: FONT_FAMILY, color: "0c4a6e" }), // Brand color 900
       new TextRun({ text: `${authorsStr} (${year}). ${titleFormatted}. `, size: 20, font: FONT_FAMILY }),
@@ -452,7 +465,7 @@ export const generateDocx = async (data: ArticleData) => {
 
   // ABSTRACT PRE-PROCESSING FOR BOLD KEYWORDS
   const abstractKeywords = ["Background", "Methods", "Results", "Conclusions", "Conclusion", "Objective", "Aim", "Introduction", "References"];
-  let abstractText = data.abstract || "No abstract provided.";
+  let abstractText = sanitizeText(data.abstract || "No abstract provided.");
   abstractKeywords.forEach(keyword => {
       // Bold keyword if it starts a sentence or section
       const regex = new RegExp(`\\b(${keyword})([:\\.]?)`, 'gi');
@@ -463,7 +476,7 @@ export const generateDocx = async (data: ArticleData) => {
   const abstractBox = new Table({
      width: { size: 100, type: WidthType.PERCENTAGE },
      borders: { top: { style: BorderStyle.NONE }, bottom: { style: BorderStyle.NONE }, left: { style: BorderStyle.SINGLE, size: 48, color: "0c4a6e" }, right: { style: BorderStyle.NONE } }, // 48 is approx 6pt (1/8 inch * 8)
-     rows: [ new TableRow({ children: [ new TableCell({ shading: { fill: "f8fafc", type: ShadingType.CLEAR, color: "auto" }, margins: { top: 200, bottom: 200, left: 240, right: 200 }, children: [ new Paragraph({ alignment: AlignmentType.CENTER, children: [ new TextRun({ text: "ABSTRACT", bold: true, color: "0c4a6e", size: 22, font: FONT_FAMILY }) ], spacing: { after: 120 } }), new Paragraph({ alignment: AlignmentType.JUSTIFIED, children: parseTextToRuns(abstractText, false, 22), spacing: { after: 240 } }), new Paragraph({ alignment: AlignmentType.LEFT, children: [ new TextRun({ text: "Keywords: ", bold: true, font: FONT_FAMILY, color: "000000" }), new TextRun({ text: (data.keywords || []).join("; "), font: FONT_FAMILY }) ], spacing: { after: 120 } }) ] }) ] }) ]
+     rows: [ new TableRow({ children: [ new TableCell({ shading: { fill: "f8fafc", type: ShadingType.CLEAR, color: "auto" }, margins: { top: 200, bottom: 200, left: 240, right: 200 }, children: [ new Paragraph({ alignment: AlignmentType.CENTER, children: [ new TextRun({ text: "ABSTRACT", bold: true, color: "0c4a6e", size: 22, font: FONT_FAMILY }) ], spacing: { after: 120 } }), new Paragraph({ alignment: AlignmentType.JUSTIFIED, children: parseTextToRuns(abstractText, false, 22), spacing: { after: 240 } }), new Paragraph({ alignment: AlignmentType.LEFT, children: [ new TextRun({ text: "Keywords: ", bold: true, font: FONT_FAMILY, color: "000000" }), new TextRun({ text: sanitizeText((data.keywords || []).join("; ")), font: FONT_FAMILY }) ], spacing: { after: 120 } }) ] }) ] }) ]
   });
 
   // Separate Dates Paragraph
@@ -506,7 +519,7 @@ export const generateDocx = async (data: ArticleData) => {
     
     const combinedText = paragraphBuffer.join(" ");
     const paraProps: any = {
-        children: parseTextToRuns(combinedText),
+        children: parseTextToRuns(sanitizeText(combinedText)),
         spacing: { after: 120 },
         alignment: AlignmentType.JUSTIFIED,
         indent: { firstLine: 567 } // 1. PARAGRAPH INDENTATION (1cm)
@@ -580,16 +593,25 @@ export const generateDocx = async (data: ArticleData) => {
             try {
                 const imgBuffer = await getImageData(figure.file);
                 if (imgBuffer.byteLength > 0) {
+                     // Heuristic for large image
+                     const isLarge = (altText || "").toLowerCase().includes('large') || (altText || "").toLowerCase().includes('wide');
+                     
                      // Add Image Paragraph
                      contentChildren.push(new Paragraph({ 
-                         children: [ new ImageRun({ data: imgBuffer, transformation: { width: 300, height: 200 } }) ], 
+                         children: [ new ImageRun({ 
+                             data: imgBuffer, 
+                             transformation: { 
+                                 width: isLarge ? 500 : 300, 
+                                 height: isLarge ? 350 : 200 
+                             } 
+                         }) ], 
                          alignment: AlignmentType.CENTER, 
                          spacing: { before: 200, after: 100 } 
                      }));
                      // Add Caption Paragraph
                      if (altText || figure.name) {
                          contentChildren.push(new Paragraph({ 
-                             children: [new TextRun({ text: altText || figure.name, italics: true, bold: true, size: 18, font: FONT_FAMILY })], 
+                             children: [new TextRun({ text: sanitizeText(altText || figure.name), italics: true, bold: true, size: 18, font: FONT_FAMILY })], 
                              alignment: AlignmentType.CENTER, 
                              spacing: { after: 240 } 
                          }));
