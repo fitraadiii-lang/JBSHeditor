@@ -51,6 +51,7 @@ const callGeminiWithRetry = async (fn: () => Promise<any>, retries = MAX_RETRIES
 export const parseRawManuscript = async (
   rawText: string, 
   availableFigures: Figure[] = [], 
+  articleType: string = 'Original Research Article',
   userKey?: string, 
   userModel?: string
 ): Promise<Partial<ArticleData>> => {
@@ -68,11 +69,12 @@ export const parseRawManuscript = async (
   const prompt = `
     SYSTEM ROLE: You are a High-Fidelity Verbatim Extraction Engine for Biomedical Manuscripts.
     OBJECTIVE: Extract content from the provided manuscript into structured JSON with 100% TEXTUAL INTEGRITY.
+    ARTICLE TYPE: ${articleType}
 
     *** CRITICAL INSTRUCTIONS: READ CAREFULLY ***
     1.  **NO SUMMARIZATION**: You are strictly FORBIDDEN from summarizing.
     2.  **NO REWRITING**: Do not change words or grammar. Copy text exactly as it appears.
-    3.  **FULL EXTRACTION**: You must extract the ENTIRETY of the Introduction, Methods, Results, Discussion, and References.
+    3.  **FULL EXTRACTION**: You must extract ALL relevant sections (e.g., Introduction, Methods, Results, Discussion, Conclusion, References) as they appear in the manuscript. The specific sections may vary based on the article type (e.g., Original Research, Narrative Review, Systematic Review).
     4.  **UNSTRUCTURED INPUT**: The input text might be missing newlines between titles, authors, and abstracts.
         - You must INTELLIGENTLY SPLIT this text.
         - The Title is usually the first sentence.

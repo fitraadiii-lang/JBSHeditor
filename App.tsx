@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Printer, BookOpen, FileCheck, FileDown, Edit, Edit3, Home } from 'lucide-react';
 import Editor from './components/Editor';
 import ArticlePreview from './components/ArticlePreview';
@@ -57,6 +57,21 @@ const App: React.FC = () => {
   const [showLoa, setShowLoa] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
 
+  // Load API key from localStorage on mount
+  useEffect(() => {
+    const savedKey = localStorage.getItem('jbsh_gemini_api_key');
+    if (savedKey) {
+      setArticleData(prev => ({ ...prev, geminiApiKey: savedKey }));
+    }
+  }, []);
+
+  // Save API key to localStorage when it changes
+  useEffect(() => {
+    if (articleData.geminiApiKey) {
+      localStorage.setItem('jbsh_gemini_api_key', articleData.geminiApiKey);
+    }
+  }, [articleData.geminiApiKey]);
+
   const handleImport = async (text: string) => {
     setIsProcessing(true);
     try {
@@ -64,6 +79,7 @@ const App: React.FC = () => {
       const parsedData = await parseRawManuscript(
         text, 
         articleData.figures, 
+        articleData.articleType, // Pass articleType
         articleData.geminiApiKey, 
         articleData.geminiModel
       );

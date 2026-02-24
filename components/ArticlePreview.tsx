@@ -213,7 +213,7 @@ const ArticlePreview: React.FC<ArticlePreviewProps> = ({ data, isEditable = fals
                 ))}
             </div>
 
-            <div className="text-xs text-black italic space-y-0.5 mb-2">
+            <div className="text-[10pt] text-black italic space-y-0.5 mb-2">
                 {uniqueAffiliations.map((aff, idx) => (
                 <div key={idx}>
                     <sup className="mr-1">{idx + 1}</sup>
@@ -223,7 +223,7 @@ const ArticlePreview: React.FC<ArticlePreviewProps> = ({ data, isEditable = fals
             </div>
             
             {correspondingAuthor && (
-                <div className="text-xs text-black border-b border-gray-300 pb-4 mb-4">
+                <div className="text-[10pt] text-black border-b border-gray-300 pb-4 mb-4">
                 *Correspondence: <a href={`mailto:${correspondingAuthor.email}`} className="text-blue-700 underline hover:text-blue-900">{correspondingAuthor.email}</a>
                 </div>
             )}
@@ -285,12 +285,37 @@ const ArticlePreview: React.FC<ArticlePreviewProps> = ({ data, isEditable = fals
                   if (isBlock) return <div {...props}>{children}</div>;
                   return <p {...props}>{children}</p>;
                 },
+                table: ({node, ...props}) => {
+                  // Heuristic: If table has more than 4 columns, make it span both columns
+                  const children = (node as any)?.children || [];
+                  const thead = children.find((c: any) => c.tagName === 'thead');
+                  const tbody = children.find((c: any) => c.tagName === 'tbody');
+                  const firstRow = (thead?.children || tbody?.children || []).find((c: any) => c.tagName === 'tr');
+                  const colCount = (firstRow?.children || []).filter((c: any) => c.tagName === 'th' || c.tagName === 'td').length || 0;
+                  const isLarge = colCount > 4;
+                  
+                  return (
+                    <div className="overflow-x-auto my-4" style={isLarge ? { columnSpan: 'all' } : {} as any}>
+                      <table {...props} className={`w-full text-xs ${isLarge ? 'border-t-2 border-b-2 border-black' : ''}`} />
+                    </div>
+                  );
+                },
                 img: ({node, ...props}) => {
                    const uploadedFig = data.figures.find(f => f.id === props.src);
                    const src = uploadedFig ? uploadedFig.previewUrl : props.src;
+                   // Heuristic: If alt text contains "large" or "wide", span columns
+                   const isLarge = props.alt?.toLowerCase().includes('large') || props.alt?.toLowerCase().includes('wide');
+                   
                    return (
-                     <figure className="my-4 break-inside-avoid text-center">
-                       <img {...props} src={src} className="mx-auto w-full max-w-[300px] h-auto object-contain mb-1" />
+                     <figure 
+                        className="my-4 break-inside-avoid text-center" 
+                        style={isLarge ? { columnSpan: 'all' } : {} as any}
+                     >
+                       <img 
+                        {...props} 
+                        src={src} 
+                        className={`mx-auto h-auto object-contain mb-1 ${isLarge ? 'w-full' : 'max-w-[300px]'}`} 
+                       />
                        {props.alt && <figcaption className="text-center text-[10px] text-black font-bold">{props.alt}</figcaption>}
                      </figure>
                   );

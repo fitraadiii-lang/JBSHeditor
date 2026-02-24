@@ -236,12 +236,12 @@ export const generateDocx = async (data: ArticleData) => {
   // Prepare Correspondence Children for DOCX
   const correspondenceChildren: (TextRun | ExternalHyperlink)[] = [];
   if (correspondingAuthor?.email) {
-      correspondenceChildren.push(new TextRun({ text: "*Correspondence: ", size: 16, font: FONT_FAMILY }));
+      correspondenceChildren.push(new TextRun({ text: "*Correspondence: ", size: 20, font: FONT_FAMILY }));
       correspondenceChildren.push(new ExternalHyperlink({
           children: [
             new TextRun({ 
                 text: correspondingAuthor.email, 
-                size: 16, 
+                size: 20, 
                 font: FONT_FAMILY,
                 color: "0c4a6e", // Brand color
                 underline: { type: "single", color: "0c4a6e" } 
