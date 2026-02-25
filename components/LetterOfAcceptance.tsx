@@ -78,7 +78,7 @@ const LetterOfAcceptance: React.FC<LoAProps> = ({ data, onClose }) => {
                     </p>
 
                     <p>
-                        Your article is scheduled for publication in <strong>Volume {data.volume || 'X'}, Issue {data.issue || 'X'} ({new Date().getFullYear()})</strong>.
+                        Your article is scheduled for publication in <strong>Volume {data.volume || 'X'}, Issue {data.issue || 'X'} ({data.publicationYear || new Date().getFullYear()})</strong>.
                         Please note that the article will be available Open Access under the Creative Commons Attribution 4.0 International License (CC BY 4.0).
                     </p>
                     

@@ -20,6 +20,7 @@ const INITIAL_DATA: ArticleData = {
   volume: "3",
   issue: "1",
   pages: "1-10",
+  publicationYear: "2026",
   doi: "10.34310/jbsh.v3.i1.xxxx",
   receivedDate: "10 October 2025",
   revisedDate: "15 November 2025",

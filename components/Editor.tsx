@@ -480,10 +480,16 @@ const Editor: React.FC<EditorProps> = ({ data, onChange, onImport, onImproveAbst
                     <input value={data.pages || ''} onChange={(e) => updateField('pages', e.target.value)} className="w-full border rounded p-1.5 text-xs" />
                   </div>
                 </div>
-                 <div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">Year</label>
+                    <input value={data.publicationYear || ''} onChange={(e) => updateField('publicationYear', e.target.value)} className="w-full border rounded p-1.5 text-xs" placeholder="2026" />
+                  </div>
+                  <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">DOI</label>
                     <input value={data.doi || ''} onChange={(e) => updateField('doi', e.target.value)} className="w-full border rounded p-1.5 text-xs" placeholder="10.34310/jbsh..." />
                   </div>
+                </div>
                   
                    {/* NEW: Dates Section */}
                   <div className="pt-2 mt-2 border-t border-gray-200">

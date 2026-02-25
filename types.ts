@@ -28,6 +28,7 @@ export interface ArticleData {
   issue?: string;
   pages?: string;
   figures: Figure[];
+  publicationYear?: string;
   logoUrl?: string; // New field for custom journal logo
   licenseLogoUrl?: string; // New field for custom license logo
   geminiApiKey?: string;

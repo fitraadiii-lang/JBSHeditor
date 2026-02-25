@@ -59,6 +59,21 @@ const getImageData = async (source: string | File): Promise<ArrayBuffer> => {
 };
 
 // Helper for "Capitalize Each Word" with APA-style minor words handling
+const toSentenceCase = (str: string) => {
+  if (!str) return '';
+  const trimmed = str.trim();
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1).toLowerCase();
+};
+
+const formatAuthorAPA = (name: string) => {
+  if (!name) return '';
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0];
+  const surname = parts.pop() || '';
+  const initials = parts.map(p => p.charAt(0).toUpperCase() + '.').join(' ');
+  return `${surname}, ${initials}`;
+};
+
 const toTitleCase = (str: string) => {
   if (!str) return '';
   const minorWords = ['of', 'and', 'as', 'in', 'the', 'to', 'for', 'with', 'on', 'at', 'by', 'from', 'a', 'an'];
@@ -286,22 +301,20 @@ export const generateDocx = async (data: ArticleData) => {
   });
 
   // 3. Citation
-  const year = new Date().getFullYear();
-  const authorNames = (data.authors || []).map(a => sanitizeText(a.name));
+  const year = data.publicationYear || new Date().getFullYear().toString();
+  const formattedAuthors = (data.authors || []).map(a => formatAuthorAPA(sanitizeText(a.name)));
   let authorsStr = "";
   
-  if (authorNames.length === 1) {
-    authorsStr = authorNames[0];
-  } else if (authorNames.length === 2) {
-    authorsStr = `${authorNames[0]} & ${authorNames[1]}`;
-  } else if (authorNames.length > 0) {
-    // APA Style for multiple authors
-    authorsStr = authorNames.slice(0, -1).join(", ") + ", & " + authorNames[authorNames.length - 1];
+  if (formattedAuthors.length === 1) {
+    authorsStr = formattedAuthors[0];
+  } else if (formattedAuthors.length > 1) {
+    // APA 7th uses comma before ampersand for 2+ authors
+    authorsStr = formattedAuthors.slice(0, -1).join(", ") + ", & " + formattedAuthors[formattedAuthors.length - 1];
   } else {
     authorsStr = "Author";
   }
 
-  const titleFormatted = toTitleCase(sanitizeText(data.title || "Untitled Article"));
+  const titleFormatted = toSentenceCase(sanitizeText(data.title || "Untitled Article"));
   const citationRuns: (TextRun | ExternalHyperlink)[] = [
       new TextRun({ text: "Cite this article: ", bold: true, size: 20, font: FONT_FAMILY, color: "0c4a6e" }), // Brand color 900
       new TextRun({ text: `${authorsStr} (${year}). ${titleFormatted}. `, size: 20, font: FONT_FAMILY }),
@@ -518,14 +531,31 @@ export const generateDocx = async (data: ArticleData) => {
     if (paragraphBuffer.length === 0) return;
     
     const combinedText = paragraphBuffer.join(" ");
+    const fullText = sanitizeText(combinedText);
+    
+    // Check if this is a Table caption (starts with Table/Tabel)
+    const isTableCaption = /^(Table|Tabel)\s+\d+/i.test(fullText);
+    
     const paraProps: any = {
-        children: parseTextToRuns(sanitizeText(combinedText)),
+        children: parseTextToRuns(fullText),
         spacing: { after: 120 },
         alignment: AlignmentType.JUSTIFIED,
         indent: { firstLine: 567 } // 1. PARAGRAPH INDENTATION (1cm)
     };
 
-    if (inReferences) {
+    if (isTableCaption) {
+        const match = fullText.match(/^(Table|Tabel)\s+\d+[:\.]?\s*(.*)/i);
+        if (match) {
+            const prefix = fullText.substring(0, fullText.indexOf(match[2])).trim();
+            const rest = match[2];
+            paraProps.children = [
+                new TextRun({ text: prefix, bold: true, size: 20, font: FONT_FAMILY }),
+                ...parseTextToRuns(` ${rest}`, false, 20)
+            ];
+            paraProps.alignment = AlignmentType.CENTER;
+            paraProps.indent = undefined;
+        }
+    } else if (inReferences) {
         // Hanging indent for references (0.5cm approx 284 twips)
         // Justified alignment for references as requested
         paraProps.indent = { left: 284, hanging: 284 };
@@ -610,8 +640,25 @@ export const generateDocx = async (data: ArticleData) => {
                      }));
                      // Add Caption Paragraph
                      if (altText || figure.name) {
+                         const fullCaption = sanitizeText(altText || figure.name);
+                         const match = fullCaption.match(/^(Figure|Table|Gambar|Tabel)\s+\d+[:\.]?/i);
+                         
+                         let captionChildren: TextRun[] = [];
+                         if (match) {
+                             const prefix = match[0];
+                             const rest = fullCaption.substring(prefix.length);
+                             captionChildren = [
+                                 new TextRun({ text: prefix, bold: true, size: 20, font: FONT_FAMILY }),
+                                 ...parseTextToRuns(rest, false, 20)
+                             ];
+                         } else {
+                             captionChildren = [
+                                 new TextRun({ text: fullCaption, size: 20, font: FONT_FAMILY })
+                             ];
+                         }
+
                          contentChildren.push(new Paragraph({ 
-                             children: [new TextRun({ text: sanitizeText(altText || figure.name), italics: true, bold: true, size: 18, font: FONT_FAMILY })], 
+                             children: captionChildren, 
                              alignment: AlignmentType.CENTER, 
                              spacing: { after: 240 } 
                          }));
@@ -674,10 +721,10 @@ export const generateDocx = async (data: ArticleData) => {
     styles: {
         default: {
             document: { run: { font: FONT_FAMILY, size: BODY_FONT_SIZE, color: "000000" }, paragraph: { spacing: { line: 240 } } },
-            // Headers maintained at 12pt (size 24)
-            heading1: { run: { font: FONT_FAMILY, bold: true, size: HEADER_FONT_SIZE, allCaps: true }, paragraph: { spacing: { before: 240, after: 120 } } },
-            heading2: { run: { font: FONT_FAMILY, bold: true, size: HEADER_FONT_SIZE }, paragraph: { spacing: { before: 200, after: 100 } } },
-            heading3: { run: { font: FONT_FAMILY, bold: true, size: HEADER_FONT_SIZE, italics: true }, paragraph: { spacing: { before: 200, after: 100 } } },
+            // Headers: H1=12pt Bold Caps, H2=11pt Bold, H3=11pt Bold Italic Blue
+            heading1: { run: { font: FONT_FAMILY, bold: true, size: HEADER_FONT_SIZE, allCaps: true, color: "000000" }, paragraph: { spacing: { before: 240, after: 120 } } },
+            heading2: { run: { font: FONT_FAMILY, bold: true, size: BODY_FONT_SIZE, color: "000000" }, paragraph: { spacing: { before: 200, after: 100 } } },
+            heading3: { run: { font: FONT_FAMILY, bold: true, size: BODY_FONT_SIZE, italics: true, color: "0c4a6e" }, paragraph: { spacing: { before: 200, after: 100 } } },
         },
     },
     sections: [

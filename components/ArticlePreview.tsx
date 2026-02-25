@@ -11,6 +11,23 @@ interface ArticlePreviewProps {
   isEditable?: boolean;
 }
 
+// Helper for APA Sentence Case (Article Titles)
+const toSentenceCase = (str: string) => {
+  if (!str) return '';
+  const trimmed = str.trim();
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1).toLowerCase();
+};
+
+// Helper for APA Author Format (Surname, I. I.)
+const formatAuthorAPA = (name: string) => {
+  if (!name) return '';
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0];
+  const surname = parts.pop() || '';
+  const initials = parts.map(p => p.charAt(0).toUpperCase() + '.').join(' ');
+  return `${surname}, ${initials}`;
+};
+
 // Helper for "Capitalize Each Word" with APA-style minor words handling
 const toTitleCase = (str: string) => {
   if (!str) return '';
@@ -58,35 +75,35 @@ const ArticlePreview: React.FC<ArticlePreviewProps> = ({ data, isEditable = fals
   };
 
   const getCitationString = () => {
-    const year = new Date().getFullYear();
+    const year = data.publicationYear || new Date().getFullYear();
     const vol = data.volume || "3";
     const iss = data.issue || "1";
     const pgs = data.pages || "1-10";
-    const titleCase = toTitleCase(data.title);
+    const sentenceTitle = toSentenceCase(data.title);
     const doiValue = (data.doi && data.doi !== "null") ? data.doi : '...';
     const doiLink = `https://doi.org/${doiValue}`;
     
-    // APA Style: List all authors
-    const authorNames = data.authors.map(a => a.name);
+    // APA Style: List all authors in Surname, I. I. format
+    const formattedAuthors = data.authors.map(a => formatAuthorAPA(a.name));
     let authorsStr = "";
-    if (authorNames.length === 1) {
-      authorsStr = authorNames[0];
-    } else if (authorNames.length === 2) {
-      authorsStr = `${authorNames[0]} & ${authorNames[1]}`;
-    } else {
-      authorsStr = authorNames.slice(0, -1).join(", ") + ", & " + authorNames[authorNames.length - 1];
+    
+    if (formattedAuthors.length === 1) {
+      authorsStr = formattedAuthors[0];
+    } else if (formattedAuthors.length > 1) {
+      // APA 7th uses comma before ampersand for 2+ authors
+      authorsStr = formattedAuthors.slice(0, -1).join(", ") + ", & " + formattedAuthors[formattedAuthors.length - 1];
     }
 
     return (
         <span>
-            {authorsStr} ({year}). {titleCase}. <em>Journal of Biomedical Sciences and Health</em>, <em>{vol}</em>({iss}), {pgs}. <a href={doiLink} target="_blank" rel="noopener noreferrer" className="text-blue-700 underline hover:text-blue-900">{doiLink}</a>
+            {authorsStr} ({year}). {sentenceTitle}. <em>Journal of Biomedical Sciences and Health</em>, <em>{vol}</em>({iss}), {pgs}. <a href={doiLink} target="_blank" rel="noopener noreferrer" className="text-blue-700 underline hover:text-blue-900">{doiLink}</a>
         </span>
     );
   };
 
   const firstAuthorSurname = data.authors[0]?.name.split(' ').pop() || "Author";
   const runningAuthor = data.authors.length > 1 ? `${firstAuthorSurname} et al.` : firstAuthorSurname;
-  const journalInfoShort = `J. Biomed. Sci. Health. ${new Date().getFullYear()}; ${data.volume || '3'}(${data.issue || '1'}): ${data.pages || '1-10'}`;
+  const journalInfoShort = `J. Biomed. Sci. Health. ${data.publicationYear || new Date().getFullYear()}; ${data.volume || '3'}(${data.issue || '1'}): ${data.pages || '1-10'}`;
   const displayTitle = toTitleCase(data.title || 'Untitled Article');
   
   const correspondingAuthor = data.authors.find(a => a.isCorresponding);
@@ -185,7 +202,7 @@ const ArticlePreview: React.FC<ArticlePreviewProps> = ({ data, isEditable = fals
 
             {/* Metadata Line */}
             <div className="border-b-2 border-black pb-1 mb-6 flex justify-between items-center text-xs text-black">
-                <span>Vol. {data.volume || '3'}, No. {data.issue || '1'}, {new Date().getFullYear()}</span>
+                <span>Vol. {data.volume || '3'}, No. {data.issue || '1'}, {data.publicationYear || new Date().getFullYear()}</span>
                 <span>DOI: <a href={`https://doi.org/${(data.doi && data.doi !== "null") ? data.doi : ''}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline hover:text-blue-800">{(data.doi && data.doi !== "null") ? data.doi : '10.34310/jbsh.vX.iX.xxxx'}</a></span>
                 <span>Pages {data.pages || '1-10'}</span>
             </div>
@@ -260,9 +277,9 @@ const ArticlePreview: React.FC<ArticlePreviewProps> = ({ data, isEditable = fals
           <div className="prose prose-sm max-w-none 
             prose-headings:font-bold 
             prose-headings:text-black 
-            prose-headings:uppercase
-            prose-h2:text-[12pt] prose-h2:mt-4 prose-h2:mb-2 prose-h2:leading-tight
-            prose-h3:text-[12pt] prose-h3:mt-3 prose-h3:mb-1 prose-h3:italic prose-h3:normal-case
+            prose-h1:text-[12pt] prose-h1:mt-6 prose-h1:mb-2 prose-h1:leading-tight prose-h1:uppercase
+            prose-h2:text-[11pt] prose-h2:mt-4 prose-h2:mb-2 prose-h2:leading-tight prose-h2:normal-case
+            prose-h3:text-[11pt] prose-h3:mt-3 prose-h3:mb-1 prose-h3:italic prose-h3:normal-case prose-h3:text-[#0c4a6e]
             prose-p:indent-4 prose-p:my-2 prose-p:leading-5
             prose-img:mx-auto prose-img:block prose-img:rounded-none prose-img:max-w-full prose-img:my-4
             prose-table:my-4 prose-table:w-full prose-table:text-xs">
@@ -270,8 +287,9 @@ const ArticlePreview: React.FC<ArticlePreviewProps> = ({ data, isEditable = fals
               remarkPlugins={[remarkMath, remarkGfm]}
               rehypePlugins={[rehypeKatex]}
               components={{
-                h2: ({node, ...props}) => <h2 className="uppercase font-bold text-[12pt] mt-6 mb-2 break-after-avoid" {...props} />,
-                h3: ({node, ...props}) => <h3 className="font-bold italic text-[12pt] mt-4 mb-2 break-after-avoid" {...props} />,
+                h1: ({node, ...props}) => <h1 className="uppercase font-bold text-[12pt] mt-8 mb-3 break-after-avoid" {...props} />,
+                h2: ({node, ...props}) => <h2 className="font-bold text-[11pt] mt-6 mb-2 break-after-avoid" {...props} />,
+                h3: ({node, ...props}) => <h3 className="font-bold italic text-[11pt] text-[#0c4a6e] mt-4 mb-2 break-after-avoid" {...props} />,
                 p: ({node, children, ...props}) => {
                   // Check if any child is an image or a figure to avoid invalid nesting in <p>
                   const isBlock = React.Children.toArray(children).some(
@@ -306,6 +324,22 @@ const ArticlePreview: React.FC<ArticlePreviewProps> = ({ data, isEditable = fals
                    // Heuristic: If alt text contains "large" or "wide", span columns
                    const isLarge = props.alt?.toLowerCase().includes('large') || props.alt?.toLowerCase().includes('wide');
                    
+                   // Caption formatting: "Figure 1: Title" -> "Figure 1" (bold), ": Title" (normal)
+                   const formatCaption = (alt: string) => {
+                      if (!alt) return null;
+                      const match = alt.match(/^(Figure|Table|Gambar|Tabel)\s+\d+[:\.]?/i);
+                      if (match) {
+                        const prefix = match[0];
+                        const rest = alt.substring(prefix.length);
+                        return (
+                          <figcaption className="text-center text-[10pt] text-black font-normal">
+                            <span className="font-bold">{prefix}</span>{rest}
+                          </figcaption>
+                        );
+                      }
+                      return <figcaption className="text-center text-[10pt] text-black font-normal">{alt}</figcaption>;
+                   };
+
                    return (
                      <figure 
                         className="my-4 break-inside-avoid text-center" 
@@ -316,7 +350,7 @@ const ArticlePreview: React.FC<ArticlePreviewProps> = ({ data, isEditable = fals
                         src={src} 
                         className={`mx-auto h-auto object-contain mb-1 ${isLarge ? 'w-full' : 'max-w-[300px]'}`} 
                        />
-                       {props.alt && <figcaption className="text-center text-[10px] text-black font-bold">{props.alt}</figcaption>}
+                       {props.alt && formatCaption(props.alt)}
                      </figure>
                   );
                 }
