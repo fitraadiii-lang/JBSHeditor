@@ -83,11 +83,16 @@ export const parseRawManuscript = async (
         - Section Headers (INTRODUCTION, METHODS) are usually capitalized.
 
     **FORMATTING RULES:**
-    1.  **Paragraphs**: Preserve paragraph breaks using double newlines (\\n\\n).
-    2.  **Tables**: Convert all tables found in the text into valid Markdown Table syntax.
-    3.  **Math**: Enclose equations in $$...$$ (block) or $...$ (inline) for LaTeX rendering.
-    4.  **Figures**: ${figureContext}
-    5.  **References**: Extract the full bibliography list as plain text.
+    1.  **Headings**: Use Markdown heading levels based on numbering:
+        - Level 1 (#): Main sections (e.g., 1. INTRODUCTION, 2. METHODS, 3. RESULTS, 4. DISCUSSION, 5. CONCLUSION, 6. REFERENCES).
+        - Level 2 (##): Sub-sections (e.g., 2.1 Study Design).
+        - Level 3 (###): Sub-sub-sections (e.g., 2.1.1 Inclusion Criteria).
+        - **LANGUAGE**: Recognize both English and Indonesian headings (e.g., 1. LATAR BELAKANG, 2. METODE, 3. HASIL, 4. PEMBAHASAN, 5. KESIMPULAN, 6. DAFTAR PUSTAKA).
+    2.  **Paragraphs**: Preserve paragraph breaks using double newlines (\\n\\n).
+    3.  **Tables**: Convert all tables found in the text into valid Markdown Table syntax.
+    4.  **Math**: Enclose equations in $$...$$ (block) or $...$ (inline) for LaTeX rendering.
+    5.  **Figures**: ${figureContext}
+    6.  **References**: Extract the full bibliography list as plain text.
 
     **INPUT TEXT:**
     (Provided below)
@@ -128,7 +133,7 @@ export const parseRawManuscript = async (
               items: {
                 type: Type.OBJECT,
                 properties: {
-                   header: { type: Type.STRING, description: "The section header (e.g. '1. INTRODUCTION'). Copy exact numbering." },
+                   header: { type: Type.STRING, description: "The section header (e.g. '1. INTRODUCTION'). Copy exact numbering. Do NOT include Markdown # symbols here." },
                    body: { type: Type.STRING, description: "THE FULL VERBATIM CONTENT of this section in Markdown. Include ALL paragraphs, tables, and figure links." }
                 }
               }
@@ -150,8 +155,18 @@ export const parseRawManuscript = async (
       if (json.contentSections && Array.isArray(json.contentSections)) {
         joinedContent = json.contentSections
           .map(section => {
-             const header = section.header.startsWith('#') ? section.header : `## ${section.header}`;
-             return `${header}\n\n${section.body}`; 
+             // Determine heading level based on numbering (e.g., 1. -> #, 2.1 -> ##, 2.1.1 -> ###)
+             const headerText = section.header.trim();
+             const dotCount = (headerText.match(/\./g) || []).length;
+             
+             let prefix = "#"; // Default to H1
+             if (dotCount === 1) prefix = "##"; // e.g., 2.1
+             if (dotCount >= 2) prefix = "###"; // e.g., 2.1.1
+             
+             // Special case: if it doesn't start with a number, default to H1
+             if (!/^\d+/.test(headerText)) prefix = "#";
+
+             return `${prefix} ${headerText}\n\n${section.body}`; 
           })
           .join('\n\n');
       }
