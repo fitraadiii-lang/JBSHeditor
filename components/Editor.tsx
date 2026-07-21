@@ -695,20 +695,19 @@ const Editor: React.FC<EditorProps> = ({ data, onChange, onImport, onImproveAbst
                 <div>
                   <label className="block text-[10px] font-bold text-purple-700 uppercase mb-1">Gemini Model</label>
                   <select 
-                    value={data.geminiModel || 'gemini-3-flash-preview'} 
+                    value={data.geminiModel || 'gemini-3.5-flash'} 
                     onChange={(e) => updateField('geminiModel', e.target.value)}
                     className="w-full border border-purple-200 rounded p-1.5 text-xs bg-white focus:ring-1 focus:ring-purple-500 outline-none"
                   >
-                    <optgroup label="Gemini 3 (Latest)">
-                      <option value="gemini-3-flash-preview">Gemini 3 Flash (Fastest)</option>
+                    <optgroup label="Gemini 3.5 (Latest)">
+                      <option value="gemini-3.5-flash">Gemini 3.5 Flash (Fastest & Recommended)</option>
+                    </optgroup>
+                    <optgroup label="Gemini 3">
+                      <option value="gemini-3-flash-preview">Gemini 3 Flash</option>
                       <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (Most Capable)</option>
                     </optgroup>
                     <optgroup label="Gemini 2.5">
                       <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-                    </optgroup>
-                    <optgroup label="Gemini 1.5 (Legacy)">
-                      <option value="gemini-1.5-flash-latest">Gemini 1.5 Flash</option>
-                      <option value="gemini-1.5-pro-latest">Gemini 1.5 Pro</option>
                     </optgroup>
                   </select>
                 </div>

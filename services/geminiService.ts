@@ -1,7 +1,7 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { ArticleData, Figure } from "../types";
 
-const DEFAULT_MODEL = 'gemini-3-flash-preview';
+const DEFAULT_MODEL = 'gemini-3.5-flash';
 
 const getAIInstance = (userKey?: string) => {
   const key = userKey || process.env.API_KEY || '';
@@ -68,14 +68,15 @@ export const parseRawManuscript = async (
 
   const prompt = `
     SYSTEM ROLE: You are a High-Fidelity Verbatim Extraction Engine for Biomedical Manuscripts.
-    OBJECTIVE: Extract content from the provided manuscript into structured JSON with 100% TEXTUAL INTEGRITY.
+    OBJECTIVE: Extract content from the provided manuscript into structured JSON with ABSOLUTE 100% TEXTUAL INTEGRITY.
     ARTICLE TYPE: ${articleType}
 
     *** CRITICAL INSTRUCTIONS: READ CAREFULLY ***
-    1.  **NO SUMMARIZATION**: You are strictly FORBIDDEN from summarizing.
-    2.  **NO REWRITING**: Do not change words or grammar. Copy text exactly as it appears.
-    3.  **FULL EXTRACTION**: You must extract ALL relevant sections (e.g., Introduction, Methods, Results, Discussion, Conclusion, References) as they appear in the manuscript. The specific sections may vary based on the article type (e.g., Original Research, Narrative Review, Systematic Review).
-    4.  **UNSTRUCTURED INPUT**: The input text might be missing newlines between titles, authors, and abstracts.
+    1.  **NO SUMMARIZATION (SANGAT KETAT)**: You are strictly FORBIDDEN from summarizing, modifying, adding, or reducing any substantive content.
+    2.  **NO REWRITING**: Do not change words, grammar, or vocabulary. Copy text EXACTLY as it appears. What is in the source text MUST be in the output JSON.
+    3.  **ZERO DATA LOSS**: You must ensure that no paragraphs, sentences, or data points are left out during the extraction process.
+    4.  **FULL EXTRACTION**: You must extract ALL relevant sections (e.g., Introduction, Methods, Results, Discussion, Conclusion, References) as they appear in the manuscript. 
+    5.  **UNSTRUCTURED INPUT**: The input text might be missing newlines between titles, authors, and abstracts.
         - You must INTELLIGENTLY SPLIT this text.
         - The Title is usually the first sentence.
         - Authors follow the title.
@@ -88,11 +89,12 @@ export const parseRawManuscript = async (
         - Level 2 (##): Sub-sections (e.g., 2.1 Study Design).
         - Level 3 (###): Sub-sub-sections (e.g., 2.1.1 Inclusion Criteria).
         - **LANGUAGE**: Recognize both English and Indonesian headings (e.g., 1. LATAR BELAKANG, 2. METODE, 3. HASIL, 4. PEMBAHASAN, 5. KESIMPULAN, 6. DAFTAR PUSTAKA).
-    2.  **Paragraphs**: Preserve paragraph breaks using double newlines (\\n\\n).
-    3.  **Tables**: Convert all tables found in the text into valid Markdown Table syntax.
-    4.  **Math**: Enclose equations in $$...$$ (block) or $...$ (inline) for LaTeX rendering.
-    5.  **Figures**: ${figureContext}
-    6.  **References**: Extract the full bibliography list as plain text.
+    2.  **Species Names (Nomenklatur Binomial)**: VERY IMPORTANT! If you detect biological species names in the title or content, format them strictly according to rules: Capitalize the first letter of the first word, lowercase the second word, and format it in italics (e.g., *Staphylococcus aureus*, *Escherichia coli*).
+    3.  **Paragraphs**: Preserve paragraph breaks using double newlines (\\n\\n).
+    4.  **Tables**: Convert all tables found in the text into valid Markdown Table syntax without losing rows/columns.
+    5.  **Math**: Enclose equations in $$...$$ (block) or $...$ (inline) for LaTeX rendering.
+    6.  **Figures**: ${figureContext}
+    7.  **References**: Extract the full bibliography list as plain text.
 
     **INPUT TEXT:**
     (Provided below)
