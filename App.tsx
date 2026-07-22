@@ -95,8 +95,8 @@ const App: React.FC = () => {
         // IMPORTANT: We do not overwrite figures here, as they are managed manually in step 1
         figures: prev.figures 
       }));
-    } catch (error) {
-      alert("Failed to parse manuscript. Please check your API key or try again.");
+    } catch (error: any) {
+      alert("Error generating manuscript: " + (error.message || "Please check your Gemini API key in the AI Configuration tab."));
     } finally {
       setIsProcessing(false);
     }

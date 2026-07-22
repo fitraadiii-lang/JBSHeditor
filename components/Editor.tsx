@@ -695,7 +695,7 @@ const Editor: React.FC<EditorProps> = ({ data, onChange, onImport, onImproveAbst
                 <div>
                   <label className="block text-[10px] font-bold text-purple-700 uppercase mb-1">Gemini Model</label>
                   <select 
-                    value={data.geminiModel || 'gemini-3.5-flash'} 
+                    value={data.geminiModel || 'gemini-3.1-pro-preview'} 
                     onChange={(e) => updateField('geminiModel', e.target.value)}
                     className="w-full border border-purple-200 rounded p-1.5 text-xs bg-white focus:ring-1 focus:ring-purple-500 outline-none"
                   >
@@ -743,7 +743,7 @@ const Editor: React.FC<EditorProps> = ({ data, onChange, onImport, onImproveAbst
                         <button 
                             onClick={handleConfirmGeneration}
                             disabled={isProcessing}
-                            className="bg-brand-600 text-white px-6 py-2 rounded-md hover:bg-brand-700 flex items-center gap-2 text-sm font-medium transition-colors disabled:opacity-50"
+                            className="bg-blue-900 text-white px-6 py-2 rounded-md hover:bg-blue-800 flex items-center gap-2 text-sm font-medium transition-colors disabled:opacity-50"
                         >
                             {isProcessing ? <Loader2 className="animate-spin" size={16} /> : <Play size={16} />}
                             Generate Manuscript

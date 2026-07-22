@@ -64,11 +64,26 @@ const extractTextFromPDF = async (file: File): Promise<string> => {
     const page = await pdf.getPage(i);
     const textContent = await page.getTextContent();
     
-    // CHANGED: Join with newline instead of space to preserve line breaks
-    // This fixes the issue where titles, authors, and abstract merge into one block
-    const pageText = textContent.items
-        .map((item: any) => item.str)
-        .join('\n');
+    let pageText = '';
+    let lastY = -1;
+    
+    for (const item of textContent.items) {
+      if (!item.str.trim() && item.str !== ' ') continue; // Skip empty items but keep spaces
+      
+      if (lastY !== item.transform[5] && lastY !== -1) {
+        // If Y coordinate changes significantly, it's a new line
+        if (Math.abs(lastY - item.transform[5]) > 4) {
+            pageText += '\n';
+        } else {
+            // It's likely on the same line, just slightly offset
+            if (!pageText.endsWith(' ') && !item.str.startsWith(' ')) {
+                pageText += ' ';
+            }
+        }
+      }
+      pageText += item.str;
+      lastY = item.transform[5];
+    }
         
     fullText += pageText + '\n\n';
   }

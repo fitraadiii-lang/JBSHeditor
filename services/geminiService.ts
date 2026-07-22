@@ -1,10 +1,18 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, Type, HarmCategory, HarmBlockThreshold } from "@google/genai";
 import { ArticleData, Figure } from "../types";
 
-const DEFAULT_MODEL = 'gemini-3.5-flash';
+const DEFAULT_MODEL = 'gemini-3.1-pro-preview';
 
 const getAIInstance = (userKey?: string) => {
-  const key = userKey || process.env.API_KEY || '';
+  let envKey = '';
+  try {
+    // @ts-ignore
+    envKey = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_GEMINI_API_KEY : '';
+  } catch (e) {}
+  const key = userKey || envKey || '';
+  if (!key) {
+    throw new Error("API key is required. Please enter it in the AI Configuration tab.");
+  }
   return new GoogleGenAI({ apiKey: key });
 };
 
@@ -67,119 +75,101 @@ export const parseRawManuscript = async (
     : "No figures have been uploaded yet. If figures are mentioned, ignore image insertion.";
 
   const prompt = `
-    SYSTEM ROLE: You are a High-Fidelity Verbatim Extraction Engine for Biomedical Manuscripts.
-    OBJECTIVE: Extract content from the provided manuscript into structured JSON with ABSOLUTE 100% TEXTUAL INTEGRITY.
-    ARTICLE TYPE: ${articleType}
+    You are a strictly constrained Data Extraction Engine for Biomedical Manuscripts.
+    Your SOLE objective is to format the provided INPUT TEXT into structured Markdown. 
+    YOU MUST NOT SUMMARIZE. YOU MUST NOT MAKE UP TEXT. YOU MUST TRANSCRIBE THE PROVIDED INPUT TEXT VERBATIM.
 
     *** CRITICAL INSTRUCTIONS: READ CAREFULLY ***
-    1.  **NO SUMMARIZATION (SANGAT KETAT)**: You are strictly FORBIDDEN from summarizing, modifying, adding, or reducing any substantive content.
-    2.  **NO REWRITING**: Do not change words, grammar, or vocabulary. Copy text EXACTLY as it appears. What is in the source text MUST be in the output JSON.
-    3.  **ZERO DATA LOSS**: You must ensure that no paragraphs, sentences, or data points are left out during the extraction process.
-    4.  **FULL EXTRACTION**: You must extract ALL relevant sections (e.g., Introduction, Methods, Results, Discussion, Conclusion, References) as they appear in the manuscript. 
-    5.  **UNSTRUCTURED INPUT**: The input text might be missing newlines between titles, authors, and abstracts.
-        - You must INTELLIGENTLY SPLIT this text.
-        - The Title is usually the first sentence.
-        - Authors follow the title.
-        - Abstract follows authors.
-        - Section Headers (INTRODUCTION, METHODS) are usually capitalized.
-
-    **FORMATTING RULES:**
-    1.  **Headings**: Use Markdown heading levels based on numbering:
-        - Level 1 (#): Main sections (e.g., 1. INTRODUCTION, 2. METHODS, 3. RESULTS, 4. DISCUSSION, 5. CONCLUSION, 6. REFERENCES).
-        - Level 2 (##): Sub-sections (e.g., 2.1 Study Design).
-        - Level 3 (###): Sub-sub-sections (e.g., 2.1.1 Inclusion Criteria).
-        - **LANGUAGE**: Recognize both English and Indonesian headings (e.g., 1. LATAR BELAKANG, 2. METODE, 3. HASIL, 4. PEMBAHASAN, 5. KESIMPULAN, 6. DAFTAR PUSTAKA).
-    2.  **Species Names (Nomenklatur Binomial)**: VERY IMPORTANT! If you detect biological species names in the title or content, format them strictly according to rules: Capitalize the first letter of the first word, lowercase the second word, and format it in italics (e.g., *Staphylococcus aureus*, *Escherichia coli*).
-    3.  **Paragraphs**: Preserve paragraph breaks using double newlines (\\n\\n).
-    4.  **Tables**: Convert all tables found in the text into valid Markdown Table syntax without losing rows/columns.
-    5.  **Math**: Enclose equations in $$...$$ (block) or $...$ (inline) for LaTeX rendering.
+    1.  **NO SUMMARIZATION (SANGAT KETAT)**: You are strictly FORBIDDEN from summarizing, modifying, or reducing any substantive content. You are a precise copy-paste formatting tool.
+    2.  **ZERO DATA LOSS**: Ensure that NO paragraphs, sentences, or data points from the INPUT TEXT are left out. The output body must contain 100% of the original manuscript text.
+    3.  **FULL EXTRACTION**: You must extract ALL sections from start to finish from the INPUT TEXT (Introduction, Methods, Results, Discussion, Conclusion, References). YOU MUST CONTINUE TRANSCRIBING UNTIL THE VERY END OF THE INPUT TEXT.
+    4.  **IGNORE PDF ARTIFACTS**: Exclude page numbers, running headers, and footers (e.g., journal names, 'Halaman 1-8').
+    5.  **FORMATTING RULES**:
+        - Apply Markdown headers (#, ##, ###) for sections.
+        - Preserve paragraph breaks using double newlines.
+        - Format biological species names in italics (e.g., *Staphylococcus aureus*).
+        - Format Data Tables as Markdown tables.
     6.  **Figures**: ${figureContext}
-    7.  **References**: Extract the full bibliography list as plain text.
 
-    **INPUT TEXT:**
-    (Provided below)
+    **OUTPUT FORMAT**:
+    ===TITLE===
+    [Extract title here from INPUT TEXT]
+    ===ARTICLE_TYPE===
+    [Extract article type here from INPUT TEXT]
+    ===DOI===
+    [Extract DOI here from INPUT TEXT]
+    ===ABSTRACT===
+    [Extract abstract here from INPUT TEXT]
+    ===KEYWORDS===
+    [Comma separated keywords from INPUT TEXT]
+    ===AUTHORS===
+    [Name | Affiliation | Email | true/false]
+    ===CONTENT===
+    (STARTING FROM THE INTRODUCTION OF THE INPUT TEXT, COPY PASTE THE ENTIRE REMAINING MANUSCRIPT TEXT HERE. DO NOT STOP UNTIL THE LAST WORD OF THE REFERENCES. YOU MUST WRITE EVERY SINGLE WORD AND PARAGRAPH FROM THE INPUT TEXT.)
   `;
 
   try {
     const response = await callGeminiWithRetry(() => ai.models.generateContent({
       model: modelName, 
-      contents: [
-        { role: 'user', parts: [{ text: prompt }] },
-        { role: 'user', parts: [{ text: rawText }] }
-      ],
+      contents: `**INPUT TEXT:**\n${rawText}`,
       config: {
-        maxOutputTokens: 65536, 
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            title: { type: Type.STRING, description: "EXTRACT VERBATIM. Do not Capitalize if not capitalized in source." },
-            articleType: { type: Type.STRING, description: "Detect type (e.g. Original Research) or default." },
-            doi: { type: Type.STRING, description: "Extract DOI if present (e.g. 10.34310/jbsh...). If not found, do NOT return 'null' string, return an empty string." }, 
-            abstract: { type: Type.STRING, description: "EXTRACT VERBATIM. The full abstract text." },
-            keywords: { type: Type.ARRAY, items: { type: Type.STRING } },
-            authors: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  name: { type: Type.STRING },
-                  affiliation: { type: Type.STRING },
-                  email: { type: Type.STRING, nullable: true },
-                  isCorresponding: { type: Type.BOOLEAN, nullable: true }
-                }
-              }
-            },
-            contentSections: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                   header: { type: Type.STRING, description: "The section header (e.g. '1. INTRODUCTION'). Copy exact numbering. Do NOT include Markdown # symbols here." },
-                   body: { type: Type.STRING, description: "THE FULL VERBATIM CONTENT of this section in Markdown. Include ALL paragraphs, tables, and figure links." }
-                }
-              }
-            }
-          }
-        }
+        systemInstruction: prompt,
+        maxOutputTokens: 8192,
+        temperature: 0.0,
+        safetySettings: [
+          { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+          { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+          { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+          { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE }
+        ]
       }
     }));
 
     if (response.text) {
-      const json = JSON.parse(response.text) as RawGeminiResponse;
+      const text = response.text;
       
-      // Clean up "null" strings that AI might return
-      if (json.doi === "null") json.doi = "";
-      if (json.title === "null") json.title = "";
-      if (json.abstract === "null") json.abstract = "";
+      const extractSection = (tag: string, nextTag?: string) => {
+        const start = text.indexOf(`===${tag}===`);
+        if (start === -1) return "";
+        const end = nextTag ? text.indexOf(`===${nextTag}===`, start) : text.length;
+        if (end === -1) return text.substring(start + `===${tag}===`.length).trim();
+        return text.substring(start + `===${tag}===`.length, end).trim();
+      };
+
+      const title = extractSection("TITLE", "ARTICLE_TYPE");
+      const articleTypeOut = extractSection("ARTICLE_TYPE", "DOI");
+      const doi = extractSection("DOI", "ABSTRACT");
+      const abstract = extractSection("ABSTRACT", "KEYWORDS");
+      const keywordsRaw = extractSection("KEYWORDS", "AUTHORS");
+      const authorsRaw = extractSection("AUTHORS", "CONTENT");
+      const content = extractSection("CONTENT");
+
+      const keywords = keywordsRaw.split(',').map(k => k.trim()).filter(k => k);
       
-      let joinedContent = "";
-      if (json.contentSections && Array.isArray(json.contentSections)) {
-        joinedContent = json.contentSections
-          .map(section => {
-             // Determine heading level based on numbering (e.g., 1. -> #, 2.1 -> ##, 2.1.1 -> ###)
-             const headerText = section.header.trim();
-             const dotCount = (headerText.match(/\./g) || []).length;
-             
-             let prefix = "#"; // Default to H1
-             if (dotCount === 1) prefix = "##"; // e.g., 2.1
-             if (dotCount >= 2) prefix = "###"; // e.g., 2.1.1
-             
-             // Special case: if it doesn't start with a number, default to H1
-             if (!/^\d+/.test(headerText)) prefix = "#";
-
-             return `${prefix} ${headerText}\n\n${section.body}`; 
-          })
-          .join('\n\n');
-      }
-
-      if (joinedContent) {
-        joinedContent = joinedContent.replace(/\\n/g, '\n');
-      }
+      const authors = authorsRaw.split('\n').map(line => {
+        const parts = line.split('|').map(p => p.trim());
+        if (parts.length < 2) return null;
+        return {
+          name: parts[0] || '',
+          affiliation: parts[1] || '',
+          email: parts[2] !== 'undefined' ? parts[2] : undefined,
+          isCorresponding: parts[3] === 'true'
+        };
+      }).filter(Boolean) as Array<{
+        name: string;
+        affiliation: string;
+        email?: string;
+        isCorresponding?: boolean;
+      }>;
 
       return {
-        ...json,
-        content: joinedContent 
+        title: title === "null" ? "" : title,
+        articleType: articleTypeOut,
+        doi: doi === "null" ? "" : doi,
+        abstract: abstract === "null" ? "" : abstract,
+        keywords,
+        authors,
+        content: content ? content.replace(/\\n/g, '\n') : ""
       };
     }
     return {};
