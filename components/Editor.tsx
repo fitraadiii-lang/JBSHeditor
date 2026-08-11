@@ -121,12 +121,26 @@ const Editor: React.FC<EditorProps> = ({ data, onChange, onImport, onImproveAbst
   // QC Statistics Calculation
   const qcStats = useMemo(() => {
     const content = data.content || '';
+    const abstract = data.abstract || '';
+    const title = data.title || '';
+    
     const wordCount = content.trim().length === 0 ? 0 : content.trim().split(/\s+/).length;
+    const abstractCount = abstract.trim().length === 0 ? 0 : abstract.trim().split(/\s+/).length;
+    const titleCount = title.trim().length === 0 ? 0 : title.trim().split(/\s+/).length;
+    
+    let authorWords = 0;
+    if (data.authors) {
+        authorWords = data.authors.reduce((acc, a) => acc + (a.name.split(/\s+/).length) + (a.affiliation.split(/\s+/).length), 0);
+    }
+    
+    const totalExtractedWordCount = wordCount + abstractCount + titleCount + authorWords;
     
     let transferPercentage = 100;
     if (rawWordCount > 0) {
-        transferPercentage = Math.round((wordCount / rawWordCount) * 100);
-        if (transferPercentage > 100) transferPercentage = 100;
+        // Account for PDF artifacts (headers, footers, numbers) which inflate the raw word count
+        const adjustedRawWordCount = rawWordCount * 0.85;
+        transferPercentage = Math.round((totalExtractedWordCount / adjustedRawWordCount) * 100);
+        if (transferPercentage > 100) transferPercentage = 100; // Cap for realism
     }
     
     const hasIntro = /#+\s*(\d+\.?\s*)?Introduction/i.test(content);

@@ -82,7 +82,7 @@ export const parseRawManuscript = async (
     *** CRITICAL INSTRUCTIONS: READ CAREFULLY ***
     1.  **NO SUMMARIZATION (SANGAT KETAT)**: You are strictly FORBIDDEN from summarizing, modifying, or reducing any substantive content. You are a precise copy-paste formatting tool.
     2.  **ZERO DATA LOSS**: Ensure that NO paragraphs, sentences, or data points from the INPUT TEXT are left out. The output body must contain 100% of the original manuscript text.
-    3.  **FULL EXTRACTION**: You must extract ALL sections from start to finish from the INPUT TEXT (Introduction, Methods, Results, Discussion, Conclusion, References). YOU MUST CONTINUE TRANSCRIBING UNTIL THE VERY END OF THE INPUT TEXT.
+    3.  **FULL EXTRACTION**: You must extract ALL sections from start to finish from the INPUT TEXT (Introduction, Methods, Results, Discussion, Conclusion, References). YOU MUST CONTINUE TRANSCRIBING UNTIL THE VERY END OF THE INPUT TEXT. Even if the text is 10,000 words long, YOU MUST WRITE EVERY SINGLE WORD.
     4.  **IGNORE PDF ARTIFACTS**: Exclude page numbers, running headers, and footers (e.g., journal names, 'Halaman 1-8').
     5.  **FORMATTING RULES**:
         - Apply Markdown headers (#, ##, ###) for sections.
@@ -105,35 +105,83 @@ export const parseRawManuscript = async (
     ===AUTHORS===
     [Name | Affiliation | Email | true/false]
     ===CONTENT===
-    (STARTING FROM THE INTRODUCTION OF THE INPUT TEXT, COPY PASTE THE ENTIRE REMAINING MANUSCRIPT TEXT HERE. DO NOT STOP UNTIL THE LAST WORD OF THE REFERENCES. YOU MUST WRITE EVERY SINGLE WORD AND PARAGRAPH FROM THE INPUT TEXT.)
+    (STARTING FROM THE INTRODUCTION, COPY PASTE THE ENTIRE REMAINING MANUSCRIPT TEXT HERE. PLEASE DO NOT STOP UNTIL THE LAST WORD OF THE REFERENCES. PLEASE WRITE EVERY SINGLE WORD AND PARAGRAPH FROM THE INPUT TEXT EXACTLY AS IT IS.)
   `;
 
   try {
-    const response = await callGeminiWithRetry(() => ai.models.generateContent({
-      model: modelName, 
-      contents: `**INPUT TEXT:**\n${rawText}`,
-      config: {
-        systemInstruction: prompt,
-        maxOutputTokens: 8192,
-        temperature: 0.0,
-        safetySettings: [
-          { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-          { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
-          { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
-          { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE }
-        ]
+    let fullText = "";
+    let isDone = false;
+    
+    let currentContents: any[] = [
+      {
+        role: "user",
+        parts: [{ text: `**INPUT TEXT:**\n${rawText}\n\n***INSTRUCTION***: Please transcribe the remaining manuscript word-for-word exactly as it appears. Please do not summarize or skip any sections. It is important to transcribe everything until the end of the references.` }]
       }
-    }));
+    ];
 
-    if (response.text) {
-      const text = response.text;
+    while (!isDone) {
+      const response = await callGeminiWithRetry(() => ai.models.generateContent({
+        model: modelName, 
+        contents: currentContents,
+        config: {
+          systemInstruction: prompt,
+          maxOutputTokens: 8192,
+          temperature: 0.0,
+          safetySettings: [
+            { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+            { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+            { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+            { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE }
+          ]
+        }
+      }));
+
+      if (!response.text) {
+        break;
+      }
+
+      fullText += response.text;
+      const finishReason = response.candidates?.[0]?.finishReason;
+      
+      if (finishReason === 'MAX_TOKENS') {
+        currentContents.push({
+          role: "model",
+          parts: [{ text: response.text }]
+        });
+        currentContents.push({
+          role: "user",
+          parts: [{ text: "Continue transcribing exactly from where you left off. Do not repeat the last sentence, just continue immediately. DO NOT STOP until you reach the end of the manuscript." }]
+        });
+        console.log("Max tokens reached. Continuing generation...");
+      } else {
+        isDone = true;
+      }
+    }
+
+    if (fullText) {
+      const text = fullText;
       
       const extractSection = (tag: string, nextTag?: string) => {
-        const start = text.indexOf(`===${tag}===`);
-        if (start === -1) return "";
-        const end = nextTag ? text.indexOf(`===${nextTag}===`, start) : text.length;
-        if (end === -1) return text.substring(start + `===${tag}===`.length).trim();
-        return text.substring(start + `===${tag}===`.length, end).trim();
+        const tagRegex = new RegExp(`===?\\s*\\*?\\*?${tag}\\*?\\*?\\s*===?`, 'i');
+        const match = text.match(tagRegex);
+        
+        if (!match) {
+          if (tag === "CONTENT") return text;
+          return "";
+        }
+        
+        const start = match.index! + match[0].length;
+        let end = text.length;
+        
+        if (nextTag) {
+          const nextTagRegex = new RegExp(`===?\\s*\\*?\\*?${nextTag}\\*?\\*?\\s*===?`, 'i');
+          const nextMatch = text.substring(start).match(nextTagRegex);
+          if (nextMatch) {
+            end = start + nextMatch.index!;
+          }
+        }
+        
+        return text.substring(start, end).trim();
       };
 
       const title = extractSection("TITLE", "ARTICLE_TYPE");
