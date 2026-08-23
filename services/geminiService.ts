@@ -85,9 +85,13 @@ export const parseRawManuscript = async (
     3.  **FULL EXTRACTION**: You must extract ALL sections from start to finish from the INPUT TEXT (Introduction, Methods, Results, Discussion, Conclusion, References). YOU MUST CONTINUE TRANSCRIBING UNTIL THE VERY END OF THE INPUT TEXT. Even if the text is 10,000 words long, YOU MUST WRITE EVERY SINGLE WORD.
     4.  **IGNORE PDF ARTIFACTS**: Exclude page numbers, running headers, and footers (e.g., journal names, 'Halaman 1-8').
     5.  **FORMATTING RULES**:
-        - Apply Markdown headers (#, ##, ###) for sections.
+        - Headings Hierarchy: 
+          * Heading 1: Use # and MUST INCLUDE sequential numbering (e.g., # 1. INTRODUCTION, # 2. METHODS, # 3. RESULT)
+          * Heading 2: Use ## and MUST INCLUDE sequential hierarchical numbering (e.g., ## 3.1 Study Design, ## 3.2 Statistical Analysis)
+          * Heading 3: Use ### and MUST INCLUDE sequential hierarchical numbering (e.g., ### 3.2.1 Normality and Homogeneity). Ensure it is on its own line and DOES NOT merge with the body text paragraph.
+        - Biological Species Names: MUST be in italic format using HTML tags (e.g., <i>Staphylococcus aureus</i>). DO NOT use asterisks (*) for italics to avoid markdown symbol clutter.
+        - Table and Figure titles: MUST NOT be bolded. Remove any ** formatting from them.
         - Preserve paragraph breaks using double newlines.
-        - Format biological species names in italics (e.g., *Staphylococcus aureus*).
         - Format Data Tables as Markdown tables.
     6.  **Figures**: ${figureContext}
 

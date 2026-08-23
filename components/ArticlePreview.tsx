@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
+import rehypeRaw from 'rehype-raw';
 import { Quote, LockOpen, Lock } from 'lucide-react';
 import { ArticleData } from '../types';
 
@@ -94,7 +95,17 @@ const ArticlePreview: React.FC<ArticlePreviewProps> = ({ data, isEditable = fals
       authorsStr = formattedAuthors.slice(0, -1).join(", ") + ", & " + formattedAuthors[formattedAuthors.length - 1];
     }
 
-    return (
+    
+  let startPage = 1;
+  if (data.pages) {
+      const match = data.pages.match(/\d+/);
+      if (match) {
+          startPage = parseInt(match[0], 10);
+      }
+  }
+
+  return (
+
         <span>
             {authorsStr} ({year}). {sentenceTitle}. <em>Journal of Biomedical Sciences and Health</em>, <em>{vol}</em>({iss}), {pgs}. <a href={doiLink} target="_blank" rel="noopener noreferrer" className="text-blue-700 underline hover:text-blue-900">{doiLink}</a>
         </span>
@@ -107,6 +118,14 @@ const ArticlePreview: React.FC<ArticlePreviewProps> = ({ data, isEditable = fals
   const displayTitle = toTitleCase(data.title || 'Untitled Article');
   
   const correspondingAuthor = data.authors.find(a => a.isCorresponding);
+
+  let startPage = 1;
+  if (data.pages) {
+      const match = data.pages.match(/\d+/);
+      if (match) {
+          startPage = parseInt(match[0], 10);
+      }
+  }
 
   return (
     <div className="w-full h-full overflow-auto bg-gray-200 p-4 md:p-8 flex justify-center print:p-0 print:bg-white print:overflow-visible">
@@ -278,17 +297,17 @@ const ArticlePreview: React.FC<ArticlePreviewProps> = ({ data, isEditable = fals
             prose-headings:font-bold 
             prose-headings:text-black 
             prose-h1:text-[12pt] prose-h1:mt-6 prose-h1:mb-2 prose-h1:leading-tight prose-h1:uppercase
-            prose-h2:text-[11pt] prose-h2:mt-4 prose-h2:mb-2 prose-h2:leading-tight prose-h2:normal-case
-            prose-h3:text-[11pt] prose-h3:mt-3 prose-h3:mb-1 prose-h3:italic prose-h3:normal-case prose-h3:text-[#0c4a6e]
+            prose-h2:text-[11pt] prose-h2:mt-4 prose-h2:mb-2 prose-h2:leading-tight prose-h2:normal-case prose-h2:text-[#0c4a6e]
+            prose-h3:text-[11pt] prose-h3:mt-3 prose-h3:mb-1 prose-h3:italic prose-h3:font-bold prose-h3:normal-case prose-h3:text-[#0c4a6e]
             prose-p:indent-4 prose-p:my-2 prose-p:leading-5
             prose-img:mx-auto prose-img:block prose-img:rounded-none prose-img:max-w-full prose-img:my-4
             prose-table:my-4 prose-table:w-full prose-table:text-xs">
             <ReactMarkdown
               remarkPlugins={[remarkMath, remarkGfm]}
-              rehypePlugins={[rehypeKatex]}
+              rehypePlugins={[rehypeRaw, rehypeKatex]}
               components={{
                 h1: ({node, ...props}) => <h1 className="uppercase font-bold text-[12pt] mt-8 mb-3 break-after-avoid" {...props} />,
-                h2: ({node, ...props}) => <h2 className="font-bold text-[11pt] mt-6 mb-2 break-after-avoid" {...props} />,
+                h2: ({node, ...props}) => <h2 className="font-bold text-[11pt] text-[#0c4a6e] mt-6 mb-2 break-after-avoid" {...props} />,
                 h3: ({node, ...props}) => <h3 className="font-bold italic text-[11pt] text-[#0c4a6e] mt-4 mb-2 break-after-avoid" {...props} />,
                 p: ({node, children, ...props}) => {
                   // Check if any child is an image or a figure to avoid invalid nesting in <p>
@@ -382,7 +401,7 @@ const ArticlePreview: React.FC<ArticlePreviewProps> = ({ data, isEditable = fals
              
              {/* Page Number Moved to Bottom Right */}
              <div className="w-full text-right mt-1">
-                 <span className="font-bold text-xs">1</span>
+                 <span className="font-bold text-xs">{startPage}</span>
              </div>
         </div>
 

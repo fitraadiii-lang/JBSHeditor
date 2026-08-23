@@ -19,7 +19,8 @@ import {
   VerticalAlign,
   TabStopType,
   TableLayoutType,
-  ExternalHyperlink
+  ExternalHyperlink,
+  NumberFormat
 } from "docx";
 import FileSaver from "file-saver";
 import { ArticleData } from "../types";
@@ -118,7 +119,7 @@ const parseTextToRuns = (text: string, forceBold = false, fontSize = BODY_FONT_S
   // 4. _{...} or _char (Subscript) - e.g. H_2O or Na_{3}
   // 5. ^{...} or ^char (Superscript) - e.g. 10^6 or 10^{6}
   
-  const regex = /(\$\$.*?\$\$|\*\*.*?\*\*|\*.*?\*|\_\{.*?\}|\_[0-9a-zA-Z]|\^\{.*?\}|\^[0-9a-zA-Z])/g;
+  const regex = /(\$\$.*?\$\$|\*\*.*?\*\*|\*.*?\*|<i>.*?<\/i>|<b>.*?<\/b>|_\{.*?\}|_[0-9a-zA-Z]|\^\{.*?\}|\^[0-9a-zA-Z])/gi;
   const parts = text.split(regex);
 
   return parts.flatMap((part) => {
@@ -144,6 +145,26 @@ const parseTextToRuns = (text: string, forceBold = false, fontSize = BODY_FONT_S
       });
     } 
     
+    // --- HTML BOLD ---
+    if (part.toLowerCase().startsWith("<b>") && part.toLowerCase().endsWith("</b>")) {
+      return new TextRun({
+        text: part.slice(3, -4),
+        bold: true,
+        font: FONT_FAMILY,
+        size: fontSize
+      });
+    }
+
+    // --- HTML ITALIC ---
+    if (part.toLowerCase().startsWith("<i>") && part.toLowerCase().endsWith("</i>")) {
+      return new TextRun({
+        text: part.slice(3, -4),
+        italics: true,
+        font: FONT_FAMILY,
+        size: fontSize
+      });
+    }
+
     // --- ITALIC ---
     if (part.startsWith("*") && part.endsWith("*")) {
       return new TextRun({
@@ -716,6 +737,16 @@ export const generateDocx = async (data: ArticleData) => {
   flushTable();
 
 
+  
+  // --- EXTRACT START PAGE ---
+  let startPage = 1;
+  if (data.pages) {
+      const match = data.pages.match(/\d+/);
+      if (match) {
+          startPage = parseInt(match[0], 10);
+      }
+  }
+
   // --- 12. DOCUMENT ASSEMBLY ---
   const doc = new Document({
     styles: {
@@ -723,13 +754,13 @@ export const generateDocx = async (data: ArticleData) => {
             document: { run: { font: FONT_FAMILY, size: BODY_FONT_SIZE, color: "000000" }, paragraph: { spacing: { line: 240 } } },
             // Headers: H1=12pt Bold Caps, H2=11pt Bold, H3=11pt Bold Italic Blue
             heading1: { run: { font: FONT_FAMILY, bold: true, size: HEADER_FONT_SIZE, allCaps: true, color: "000000" }, paragraph: { spacing: { before: 240, after: 120 } } },
-            heading2: { run: { font: FONT_FAMILY, bold: true, size: BODY_FONT_SIZE, color: "000000" }, paragraph: { spacing: { before: 200, after: 100 } } },
+            heading2: { run: { font: FONT_FAMILY, bold: true, size: BODY_FONT_SIZE, color: "0c4a6e" }, paragraph: { spacing: { before: 200, after: 100 } } },
             heading3: { run: { font: FONT_FAMILY, bold: true, size: BODY_FONT_SIZE, italics: true, color: "0c4a6e" }, paragraph: { spacing: { before: 200, after: 100 } } },
         },
     },
     sections: [
       {
-        properties: { titlePage: true, page: { margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 } } },
+        properties: { titlePage: true, page: { margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 }, pageNumbers: { start: startPage, formatType: NumberFormat.DECIMAL } } },
         headers: { default: runningHeader, first: new Header({ children: [new Paragraph({})] }) },
         footers: { default: defaultFooter, first: firstPageFooter }, 
         children: [

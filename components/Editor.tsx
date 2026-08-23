@@ -1,6 +1,6 @@
 import React, { useState, useRef, useMemo } from 'react';
 import { ArticleData, Author, EditorTab, Figure } from '../types';
-import { Plus, Trash2, Wand2, FileText, Settings, User, Upload, File as FileIcon, Loader2, X, Activity, CheckCircle, Image as ImageIcon, Copy, ImageIcon as LogoIcon, Grid, ArrowRight, HelpCircle, RefreshCw, ArrowLeft, Play } from 'lucide-react';
+import { Plus, Trash2, Wand2, FileText, Settings, User, Upload, File as FileIcon, Loader2, X, Activity, CheckCircle, AlertCircle, Image as ImageIcon, Copy, ImageIcon as LogoIcon, Grid, ArrowRight, HelpCircle, RefreshCw, ArrowLeft, Play } from 'lucide-react';
 import { extractTextFromFile } from '../services/fileExtraction';
 
 interface EditorProps {
@@ -153,13 +153,49 @@ const Editor: React.FC<EditorProps> = ({ data, onChange, onImport, onImproveAbst
     const figureCount = (content.match(/!\[.*?\]/g) || []).length;
     const tableCount = (content.match(/\|.*\|/g) || []).length > 0 ? 'Detected' : 'None';
 
+    const auditMessages: string[] = [];
+    let isReady = true;
+
+    if (!title || title.trim().length < 5) {
+       auditMessages.push("Title is missing or too short.");
+       isReady = false;
+    }
+    if (!abstract || abstract.trim().length < 30) {
+       auditMessages.push("Abstract is missing or too short.");
+       isReady = false;
+    }
+    if (!data.authors || data.authors.length === 0) {
+       auditMessages.push("No authors added.");
+       isReady = false;
+    }
+    if (wordCount < 300) {
+       auditMessages.push("Body word count is very low (< 300 words).");
+       isReady = false;
+    }
+    if (!hasIntro || !hasReferences) {
+       auditMessages.push("Missing core sections (Introduction or References).");
+       isReady = false;
+    }
+    if (!hasMethods || !hasResults || !hasDiscussion) {
+       auditMessages.push("Missing standard research sections (Methods, Results, or Discussion).");
+       // We can allow review articles to skip these, but let's encourage them or just warn.
+    }
+    if (transferPercentage < 70 && rawWordCount > 0) {
+       auditMessages.push("Content Transfer Ratio is below 70%. Some text might be missing.");
+    }
+    if (figureCount !== (data.figures || []).length) {
+       auditMessages.push("Mismatch between uploaded figures and figures referenced in text.");
+    }
+    
     return {
       wordCount,
       transferPercentage,
       sections: { hasIntro, hasMethods, hasResults, hasDiscussion, hasReferences },
       refCount,
       figureCount,
-      tableCount
+      tableCount,
+      isReady,
+      auditMessages
     };
   }, [data.content, rawWordCount]);
 
@@ -272,7 +308,7 @@ const Editor: React.FC<EditorProps> = ({ data, onChange, onImport, onImproveAbst
     if (!previewText) return;
     await onImport(previewText);
     setPreviewText(null);
-    setActiveTab(EditorTab.CONTENT);
+    setActiveTab(EditorTab.PREVIEW);
   };
 
   const triggerFileInput = () => {
@@ -856,12 +892,46 @@ const Editor: React.FC<EditorProps> = ({ data, onChange, onImport, onImproveAbst
           </div>
         )}
 
-        {/* QC TAB */}
+                {/* QC TAB */}
         {activeTab === EditorTab.QC && (
           <div className="space-y-6 animate-in fade-in slide-in-from-left-4 duration-300">
-             <div className="bg-green-50 p-4 rounded-lg border border-green-200">
-                <h3 className="text-green-900 font-bold flex items-center gap-2 mb-4">
-                  <Activity size={18} /> Quality Control
+             
+             {/* Publish Readiness Status */}
+             <div className={`p-4 rounded-lg border ${qcStats.isReady ? 'bg-green-50 border-green-200' : 'bg-amber-50 border-amber-200'}`}>
+                <h3 className={`font-bold flex items-center gap-2 mb-2 ${qcStats.isReady ? 'text-green-900' : 'text-amber-900'}`}>
+                  {qcStats.isReady ? <CheckCircle size={18} /> : <AlertCircle size={18} />} 
+                  {qcStats.isReady ? 'Status: Layak Publish' : 'Status: Belum Layak Publish'}
+                </h3>
+                <p className={`text-sm ${qcStats.isReady ? 'text-green-800' : 'text-amber-800'}`}>
+                  {qcStats.isReady 
+                    ? 'Manuskrip sudah lengkap dan memenuhi standar minimum. Anda bisa mengekspornya sekarang.' 
+                    : 'Ada beberapa hal yang perlu dilengkapi sebelum manuskrip siap dipublish:'}
+                </p>
+                {!qcStats.isReady && qcStats.auditMessages.length > 0 && (
+                  <ul className="mt-3 space-y-1">
+                    {qcStats.auditMessages.map((msg, idx) => (
+                      <li key={idx} className="text-sm text-amber-700 flex items-start gap-2">
+                        <span className="mt-1 flex-shrink-0">•</span>
+                        <span>{msg}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {qcStats.isReady && qcStats.auditMessages.length > 0 && (
+                  <ul className="mt-3 space-y-1">
+                    {qcStats.auditMessages.map((msg, idx) => (
+                      <li key={idx} className="text-sm text-amber-700 flex items-start gap-2">
+                        <span className="mt-1 flex-shrink-0 text-amber-500"><AlertCircle size={14} /></span>
+                        <span>Warning: {msg}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+             </div>
+
+             <div className="bg-white p-4 rounded-lg border border-gray-200">
+                <h3 className="text-gray-900 font-bold flex items-center gap-2 mb-4">
+                  <Activity size={18} className="text-brand-600" /> Detail Audit
                 </h3>
                 <div className="space-y-4">
                   <div className="flex justify-between items-center border-b border-green-200 pb-2">
