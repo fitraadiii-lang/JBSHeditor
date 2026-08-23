@@ -952,6 +952,14 @@ const Editor: React.FC<EditorProps> = ({ data, onChange, onImport, onImproveAbst
                     <span className="text-sm text-gray-700">Word Count (Body)</span>
                     <span className="text-sm font-bold text-gray-900">{qcStats.wordCount}</span>
                   </div>
+                  <div className="flex justify-between items-center border-b border-green-200 pb-2">
+                    <span className="text-sm text-gray-700">Total Extracted Words</span>
+                    <span className="text-sm font-bold text-gray-900">{qcStats.wordCount + (data.abstract || '').trim().split(/\s+/).length + (data.title || '').trim().split(/\s+/).length}</span>
+                  </div>
+                  <div className="flex justify-between items-center border-b border-green-200 pb-2">
+                    <span className="text-sm text-gray-700">Raw Source Words (PDF/DOCX)</span>
+                    <span className="text-sm font-bold text-gray-900">{rawWordCount}</span>
+                  </div>
                    <div className="flex justify-between items-center border-b border-green-200 pb-2">
                     <span className="text-sm text-gray-700">Figures Detected</span>
                     <span className="text-sm font-bold text-gray-900">{qcStats.figureCount}</span>

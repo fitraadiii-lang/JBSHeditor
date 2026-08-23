@@ -110,6 +110,7 @@ export const parseRawManuscript = async (
     [Name | Affiliation | Email | true/false]
     ===CONTENT===
     (STARTING FROM THE INTRODUCTION, COPY PASTE THE ENTIRE REMAINING MANUSCRIPT TEXT HERE. PLEASE DO NOT STOP UNTIL THE LAST WORD OF THE REFERENCES. PLEASE WRITE EVERY SINGLE WORD AND PARAGRAPH FROM THE INPUT TEXT EXACTLY AS IT IS.)
+    ===END_OF_MANUSCRIPT===
   `;
 
   try {
@@ -146,17 +147,24 @@ export const parseRawManuscript = async (
 
       fullText += response.text;
       const finishReason = response.candidates?.[0]?.finishReason;
+      const hasEndMarker = fullText.includes('===END_OF_MANUSCRIPT===');
       
-      if (finishReason === 'MAX_TOKENS') {
+      if (finishReason === 'MAX_TOKENS' || (!hasEndMarker && finishReason === 'STOP')) {
         currentContents.push({
           role: "model",
           parts: [{ text: response.text }]
         });
         currentContents.push({
           role: "user",
-          parts: [{ text: "Continue transcribing exactly from where you left off. Do not repeat the last sentence, just continue immediately. DO NOT STOP until you reach the end of the manuscript." }]
+          parts: [{ text: "You stopped prematurely without reaching ===END_OF_MANUSCRIPT===. Continue transcribing exactly from where you left off. Do not repeat the last sentence, just continue immediately. DO NOT STOP until you reach the end of the manuscript and output ===END_OF_MANUSCRIPT===." }]
         });
-        console.log("Max tokens reached. Continuing generation...");
+        console.log("Premature stop or max tokens. Continuing generation...");
+        
+        // Failsafe to prevent infinite loops if the model absolutely refuses to output the marker
+        if (currentContents.length > 20) {
+            console.warn("Failsafe triggered: Model stuck in continuation loop.");
+            isDone = true;
+        }
       } else {
         isDone = true;
       }
@@ -194,7 +202,8 @@ export const parseRawManuscript = async (
       const abstract = extractSection("ABSTRACT", "KEYWORDS");
       const keywordsRaw = extractSection("KEYWORDS", "AUTHORS");
       const authorsRaw = extractSection("AUTHORS", "CONTENT");
-      const content = extractSection("CONTENT");
+      const contentRaw = extractSection("CONTENT", "END_OF_MANUSCRIPT");
+      const content = contentRaw.replace(/===?\s*\*?\*?END_OF_MANUSCRIPT\*?\*?\s*===?/gi, "").trim();
 
       const keywords = keywordsRaw.split(',').map(k => k.trim()).filter(k => k);
       

@@ -75,10 +75,9 @@ const extractTextFromPDF = async (file: File): Promise<string> => {
         if (Math.abs(lastY - item.transform[5]) > 4) {
             pageText += '\n';
         } else {
-            // It's likely on the same line, just slightly offset
-            if (!pageText.endsWith(' ') && !item.str.startsWith(' ')) {
-                pageText += ' ';
-            }
+            // It's likely on the same line, just slightly offset (e.g. superscript/subscript).
+            // Do NOT blindly add a space here, it artificially inflates word counts 
+            // when PDF.js reads individual letters with slight baseline shifts.
         }
       }
       pageText += item.str;
